@@ -7,8 +7,13 @@ class ApiService {
   // Base URL mengarah ke emulator lokal laptop yang terhubung ke Laragon
   static const String baseUrl = "http://10.0.2.2:8000/api";
 
-  // Client HTTP reusable
-  final http.Client client = http.Client();
+  // 🎯 PERBAIKAN 1: Menerapkan Singleton Pattern agar instance ApiService & http.Client cuma dibuat 1x global
+  static final ApiService _instance = ApiService._internal();
+  factory ApiService() => _instance;
+
+  final http.Client _client;
+
+  ApiService._internal() : _client = http.Client();
 
   // Header standar untuk komunikasi JSON API
   Map<String, String> _getHeaders(String? token) {
@@ -45,7 +50,7 @@ class ApiService {
   Future<http.Response> get(String endpoint, {String? token}) async {
     final url = Uri.parse('$baseUrl$endpoint');
 
-    return _safeRequest(() => client.get(
+    return _safeRequest(() => _client.get(
       url,
       headers: _getHeaders(token),
     ));
@@ -57,7 +62,7 @@ class ApiService {
   Future<http.Response> post(String endpoint, {Map<String, dynamic>? body, String? token}) async {
     final url = Uri.parse('$baseUrl$endpoint');
 
-    return _safeRequest(() => client.post(
+    return _safeRequest(() => _client.post(
       url,
       headers: _getHeaders(token),
       body: body != null ? json.encode(body) : null,
@@ -70,7 +75,7 @@ class ApiService {
   Future<http.Response> put(String endpoint, {Map<String, dynamic>? body, String? token}) async {
     final url = Uri.parse('$baseUrl$endpoint');
 
-    return _safeRequest(() => client.put(
+    return _safeRequest(() => _client.put(
       url,
       headers: _getHeaders(token),
       body: body != null ? json.encode(body) : null,
@@ -83,14 +88,9 @@ class ApiService {
   Future<http.Response> delete(String endpoint, {String? token}) async {
     final url = Uri.parse('$baseUrl$endpoint');
 
-    return _safeRequest(() => client.delete(
+    return _safeRequest(() => _client.delete(
       url,
       headers: _getHeaders(token),
     ));
-  }
-
-  // Jangan lupa menutup client jika Service dihancurkan untuk mencegah memory leak
-  void dispose() {
-    client.close();
   }
 }

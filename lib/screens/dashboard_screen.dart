@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../logic/logic_dashboard.dart';
+import 'login_screen.dart'; // 🎯 Pastikan import LoginScreen terpasang dengan benar
 
 class DashboardScreen extends StatefulWidget {
   final String token;
@@ -12,7 +13,6 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   late final DashboardLogic _logic;
-
   final Color _activeColor = const Color(0xFF102E5A);
 
   @override
@@ -29,15 +29,57 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _loadDashboardData();
   }
 
+  /// Memuat data dashboard dengan penanganan error pemeliharaan backend
   Future<void> _loadDashboardData() async {
     if (!mounted) return;
-    await _logic.fetchDashboardData(updatedToken: widget.token);
+
+    try {
+      await _logic.fetchDashboardData(updatedToken: widget.token);
+    } catch (e) {
+      // 🎯 FIX: Jika catch menangkap exception dari logic karena server mati / gantung
+      if (mounted) {
+        _handleServerMaintenance();
+      }
+    }
+  }
+
+  /// Fungsi interseptor untuk menendang pengguna kembali ke login saat server mati
+  void _handleServerMaintenance() {
+    // Tampilkan pesan error transparan ke pengguna sebelum kembali ke login
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Row(
+          children: [
+            Icon(Icons.gpp_maybe_rounded, color: Colors.white),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Sistem sedang dalam pemeliharaan (Maintenance). Koneksi ke backend terputus, silakan masuk kembali nanti.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.red.shade800,
+        duration: const Duration(seconds: 4),
+      ),
+    );
+
+    // Kembalikan paksa pengguna ke halaman Login dan bersihkan tumpukan navigasi (clear stack)
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
+          (route) => false,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     double rasioOkupansiAngka = _logic.totalUnit > 0 ? (_logic.unitTerisi / _logic.totalUnit) : 0.0;
     String rasioOkupansiTeks = "${(rasioOkupansiAngka * 100).toStringAsFixed(0)}%";
+
+    // Menghitung total pilar demografi secara aman untuk UI progress bar
+    int totalPgh = _logic.totalPenghuni;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
@@ -79,7 +121,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(height: 16),
 
-              // 🎯 FIXED: Menyembunyikan Alert Card jika semua data wawancara adalah 0
+              // 2. Alert Card Antrean Wawancara Utama
               if (_logic.belumDiwawancara > 0 ||
                   _logic.wawancaraHariIni > 0 ||
                   _logic.wawancaraBesok > 0 ||
@@ -215,14 +257,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(height: 24),
 
-              // 5. DEMOGRAFI KATEGORI UMUR
+              // 5. Demografi Umur
               Text(
                 'Kategori Demografi Umur Penghuni',
                 style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _activeColor),
               ),
               const SizedBox(height: 4),
               const Text(
-                'Kategori umur berdasarkan Klasifikasi Standar Kemenkes (Tahun 2009).',
+                'Kategori umur berdasarkan Klasifikasi Standar Kemenkes Nomor 25(Tahun 2009).',
                 style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
               const SizedBox(height: 12),
@@ -238,21 +280,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 child: Column(
                   children: [
-                    _buildAgeProgressRow('Balita (0-5 tahun)', _logic.jmlBalita, _logic.totalPenghuni, Colors.red),
+                    _buildAgeProgressRow('Balita (0-5 tahun)', _logic.jmlBalita, totalPgh, Colors.red),
                     const SizedBox(height: 12),
-                    _buildAgeProgressRow('Anak-anak (6-11 tahun)', _logic.jmlAnak, _logic.totalPenghuni, Colors.orange),
+                    _buildAgeProgressRow('Anak-anak (6-11 tahun)', _logic.jmlAnak, totalPgh, Colors.orange),
                     const SizedBox(height: 12),
-                    _buildAgeProgressRow('Remaja (12-25 tahun)', _logic.jmlRemaja, _logic.totalPenghuni, Colors.blue),
+                    _buildAgeProgressRow('Remaja (12-25 tahun)', _logic.jmlRemaja, totalPgh, Colors.blue),
                     const SizedBox(height: 12),
-                    _buildAgeProgressRow('Dewasa (26-45 tahun)', _logic.jmlDewasa, _logic.totalPenghuni, Colors.green),
+                    _buildAgeProgressRow('Dewasa (26-45 tahun)', _logic.jmlDewasa, totalPgh, Colors.green),
                     const SizedBox(height: 12),
-                    _buildAgeProgressRow('Lansia (>45 tahun)', _logic.jmlLansia, _logic.totalPenghuni, Colors.purple),
+                    _buildAgeProgressRow('Lansia (>45 tahun)', _logic.jmlLansia, totalPgh, Colors.purple),
                   ],
                 ),
               ),
               const SizedBox(height: 24),
 
-              // 6. DAFTAR PENDAFTAR BARU & JADWAL WAWANCARA
+              // 6. Daftar Antrean Wawancara
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [

@@ -98,34 +98,67 @@ class _LoginScreenState extends State<LoginScreen> {
             height: double.infinity,
             decoration: const BoxDecoration(
               image: DecorationImage(
-                image: AssetImage('assets/images/.png'),
+                image: AssetImage('assets/images/bg_disperkim.png'),
                 fit: BoxFit.cover,
               ),
             ),
           ),
 
-          // Layer gelap tipis agar background tidak terlalu terang dan kontras melayang
+          // ==========================================
+          // 🎯 PREMIUM GOLD BRAND PATTERN LAYER (FIXED)
+          // Menampilkan warna asli emas murni dari asset gambar lokal tanpa distorsi warna biru.
+          // Opacity disetel ke 0.15 agar teksturnya terlihat anggun namun tidak mengganggu tulisan.
+          // ==========================================
           Container(
             width: double.infinity,
             height: double.infinity,
-            color: Colors.black.withOpacity(0.25), // Menaikkan kontras agar logo siraja di atas lebih pop-out
+            decoration: const BoxDecoration(
+              image: DecorationImage(
+                image: AssetImage('assets/images/pattern_emas.png'),
+                repeat: ImageRepeat.repeat,
+                opacity: 0.35,
+              ),
+            ),
           ),
 
           // ==========================================
-          // 2. KONTEN UTAMA (SCROLLABLE)
+          // 2. MULTI-LAYER GRADASI ULTRA DEEP BLUE HIGH CONTRAST
+          // Membuat bagian atas sangat "biru pekat" agar logo emas memancar,
+          // namun memudar secara transparan di area bawah agar gambar gedung tetap hidup.
+          // ==========================================
+          Container(
+            width: double.infinity,
+            height: double.infinity,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  const Color(0xFF0B2244), // Biru gelap yang jauh lebih pekat dan solid di bagian paling atas
+                  primaryColor.withOpacity(0.85), // Transisi halus ke warna primary utama
+                  primaryColor.withOpacity(0.40), // Mulai memudar transparan di batas tengah wadah putih
+                  Colors.black.withOpacity(0.20), // Layer tipis gelap di bawah agar visual gedung tetap kontras
+                ],
+                stops: const [0.0, 0.25, 0.60, 0.90], // Pembagian distribusi gradasi modern melayang
+              ),
+            ),
+          ),
+
+          // ==========================================
+          // 3. KONTEN UTAMA (SCROLLABLE)
           // ==========================================
           SafeArea(
             child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
               child: Column(
                 children: [
-                  const SizedBox(height: 70),
+                  const SizedBox(height: 90),
 
                   // LOGO ATAS: logo_siraja (SIRAJA BALAREA)
                   Center(
                     child: Image.asset(
                       'assets/images/logo_aptt.png',
-                      width: 250,
+                      width: 300,
                       fit: BoxFit.contain,
                     ),
                   ),
@@ -133,15 +166,15 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 20),
 
                   // ==========================================
-                  // 3. WADAH FORM PUTIH FLOATING PREMIUM
+                  // 4. WADAH FORM PUTIH FLOATING PREMIUM
                   // ==========================================
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20), // Disamakan gap-nya dengan Register (20)
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Container(
                       padding: const EdgeInsets.fromLTRB(24, 36, 24, 36),
                       decoration: BoxDecoration(
                         color: Colors.white,
-                        borderRadius: BorderRadius.circular(28), // Menggunakan lengkungan premium bulat penuh
+                        borderRadius: BorderRadius.circular(28),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withOpacity(0.2),
@@ -261,7 +294,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                           const SizedBox(height: 14),
 
-                          // --- Remember Me Only (Forgot Password Berhasil Dihapus) ---
+                          // --- Remember Me Only ---
                           Row(
                             children: [
                               Theme(
@@ -300,15 +333,15 @@ class _LoginScreenState extends State<LoginScreen> {
                           // --- Tombol Login Utama ---
                           SizedBox(
                             width: double.infinity,
-                            height: 48, // Tinggi tombol yang ideal & kompak ala iOS modern
+                            height: 48,
                             child: ElevatedButton(
-                              onPressed: _isLoading ? null : _handleLogin, // Mencegah double tap saat sedang loading
+                              onPressed: _isLoading ? null : _handleLogin,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: primaryColor,
                                 elevation: 0,
                                 shadowColor: Colors.transparent,
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12), // Selaras dengan radius input field
+                                  borderRadius: BorderRadius.circular(12),
                                 ),
                               ),
                               child: _isLoading
@@ -354,7 +387,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 child: Text(
                                   'Daftar Disini',
                                   style: TextStyle(
-                                    color: primaryColor, // Diubah ke Deep Blue utama agar oranye hilang sepenuhnya
+                                    color: primaryColor,
                                     fontWeight: FontWeight.bold,
                                     fontSize: 13,
                                   ),

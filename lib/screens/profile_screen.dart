@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:siraja/screens/login_screen.dart';
 import 'package:siraja/logic/logic_profile.dart'; // Import logika profil di sini
@@ -15,6 +16,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final Color primaryColor = const Color(0xFF102E5A);
   final Color backgroundColor = const Color(0xFFF8FAFC); // Slate background yang lebih soft
 
+  // 🎯 DISESUAIKAN: Instansiasi biasa karena LogicProfile sekarang bukan class static
+  final LogicProfile _logicProfile = LogicProfile();
+
   bool _isLoading = false;
   bool _isLoggingOut = false;
 
@@ -25,63 +29,92 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
-    fetchProfileData();
+    // Dipanggil setelah frame pertama selesai agar sinkron dengan inisialisasi aplikasi
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      fetchProfileData();
+    });
   }
 
   /// Mengambil data profil asli dari Backend API Laravel Sanctum
   Future<void> fetchProfileData() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
     });
 
-    // Memanggil logic API dengan token session saat ini
-    final result = await LogicProfile.getProfile(widget.userToken);
+    try {
+      // 🎯 DISESUAIKAN: Memanggil via instance '_logicProfile'
+      final result = await _logicProfile.getProfile(widget.userToken);
 
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-      });
-
-      if (result['success'] == true) {
-        final userData = result['data'];
-        final List lokasiUser = userData['lokasi_user'] ?? [];
-
+      if (mounted) {
         setState(() {
-          // FIX: Memasukkan data realtime murni hasil query database MySQL backend
-          adminName = userData['name'] ?? '-';
-          adminEmail = userData['email'] ?? '-';
-
-          // Mengambil nama_lokasi aktif sesuai relasi tabel hirarki di backend
-          adminRole = lokasiUser.isNotEmpty
-              ? lokasiUser.first['lokasi']['nama_lokasi']
-              : "Super Admin";
-        });
-      } else {
-        // FIX: Hapus data tiruan "Mochamad Alphin" statis agar ketahuan jika token bermasalah
-        setState(() {
-          adminName = "Gagal Memuat";
-          adminEmail = "Token tidak valid";
-          adminRole = "Unauthenticated";
+          _isLoading = false;
         });
 
-        // Tampilkan pesan error transparan ke user
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result['message'] ?? 'Sesi telah habis. Silakan login kembali.'),
-            backgroundColor: Colors.red.shade800,
-            action: SnackBarAction(
-              label: 'LOGIN',
-              textColor: Colors.white,
-              onPressed: () {
-                Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(builder: (context) => const LoginScreen()),
-                      (route) => false,
-                );
-              },
+        if (result['success'] == true) {
+          final userData = result['data'];
+          final List lokasiUser = userData['lokasi_user'] ?? [];
+
+          setState(() {
+            adminName = userData['name'] ?? '-';
+            adminEmail = userData['email'] ?? '-';
+
+            // Mengambil nama_lokasi aktif sesuai relasi tabel hirarki di backend
+            adminRole = lokasiUser.isNotEmpty
+                ? lokasiUser.first['lokasi']['nama_lokasi']
+                : "Super Admin";
+          });
+        } else {
+          setState(() {
+            adminName = "Gagal Memuat";
+            adminEmail = "Data tidak valid";
+            adminRole = "-";
+          });
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result['message'] ?? 'Gagal memuat profil.'),
+              backgroundColor: Colors.red.shade800,
             ),
-          ),
-        );
+          );
+        }
+      }
+    } catch (e) {
+      final String errMsg = e.toString();
+      debugPrint("Profile terhambat gangguan backend: $errMsg");
+
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+
+        // 🎯 DISESUAIKAN: Jika terdeteksi Unauthenticated atau Server Mati, tendang ke login otomatis
+        if (errMsg.contains('Unauthenticated') ||
+            errMsg.contains('Server Error') ||
+            errMsg.contains('timeout') ||
+            errMsg.contains('pemeliharaan')) {
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Sesi habis atau server terputus. Silakan login kembali.'),
+              backgroundColor: Colors.redAccent,
+              duration: Duration(seconds: 3),
+            ),
+          );
+
+          // Kembalikan ke halaman login secara bersih
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (context) => const LoginScreen()),
+                (route) => false,
+          );
+        } else {
+          setState(() {
+            adminName = "Gangguan";
+            adminEmail = "Server bermasalah";
+            adminRole = "-";
+          });
+        }
       }
     }
   }
@@ -246,24 +279,52 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         isDialogLoading = true;
                       });
 
-                      final res = await LogicProfile.changePassword(
-                        widget.userToken,
-                        currentPasswordController.text,
-                        newPasswordController.text,
-                      );
-
-                      setDialogState(() {
-                        isDialogLoading = false;
-                      });
-
-                      if (mounted) {
-                        Navigator.pop(dialogContext);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(res['message']),
-                            backgroundColor: res['success'] ? Colors.green : Colors.red.shade700,
-                          ),
+                      try {
+                        // 🎯 DISESUAIKAN: Memanggil via instance '_logicProfile'
+                        final res = await _logicProfile.changePassword(
+                          widget.userToken,
+                          currentPasswordController.text,
+                          newPasswordController.text,
                         );
+
+                        setDialogState(() {
+                          isDialogLoading = false;
+                        });
+
+                        if (mounted) {
+                          Navigator.pop(dialogContext);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(res['message']),
+                              backgroundColor: res['success'] ? Colors.green : Colors.red.shade700,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        setDialogState(() {
+                          isDialogLoading = false;
+                        });
+                        if (mounted) {
+                          Navigator.pop(dialogContext);
+                        }
+
+                        final String errMsg = e.toString();
+                        debugPrint("Gagal ubah sandi karena gangguan server: $errMsg");
+
+                        // 🎯 DISESUAIKAN: Jika backend mati/unauthenticated saat submit, langsung tendang keluar
+                        if (mounted && (errMsg.contains('Unauthenticated') || errMsg.contains('Server Error') || errMsg.contains('timeout') || errMsg.contains('pemeliharaan'))) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Terjadi kendala koneksi server. Sesi diatur ulang.'),
+                              backgroundColor: Colors.redAccent,
+                            ),
+                          );
+                          Navigator.pushAndRemoveUntil(
+                            context,
+                            MaterialPageRoute(builder: (context) => const LoginScreen()),
+                                (route) => false,
+                          );
+                        }
                       }
                     }
                   },
@@ -324,7 +385,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         physics: const BouncingScrollPhysics(),
         child: Column(
           children: [
-            // 1. Header Profil Premium Terpusat
+            // 1. Header Profil Terpusat
             Container(
               width: double.infinity,
               decoration: const BoxDecoration(

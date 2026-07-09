@@ -14,7 +14,7 @@ class DashboardLogic {
   bool isLoading = false;
   String adminName = "Admin";
 
-  // 🎯 KUNCI ERD: Menyimpan daftar lokasi_id dari tabel pivot perkim_lokasi_user (Mendukung Multi-Lokasi secara Akurat)
+  // Menyimpan daftar lokasi_id dari tabel pivot perkim_lokasi_user
   List<int> allowedLokasiIds = [];
 
   // Statistik Properti & Penghuni
@@ -73,80 +73,95 @@ class DashboardLogic {
       debugPrint("--- REFRESH DATA DASHBOARD SIRAJA (TAHUN 2026) ---");
 
       // =========================================================================
-      // 1. AMBIL PROFIL USER & EKSTRAKSI RELASI PIVOT (SINKRONISASI ARRAY BACKEND)
+      // 1. AMBIL PROFIL USER & EKSTRAKSI RELASI PIVOT
       // =========================================================================
-      try {
-        final resProfile = await http.get(Uri.parse('$baseUrl/me'), headers: headers);
-        if (resProfile.statusCode == 200) {
-          final dynamic profileBody = json.decode(resProfile.body);
-          Map<String, dynamic>? userData;
+      // Ditambahkan timeout perlindungan 7 detik agar tidak gantung saat Laragon beku
+      final resProfile = await http.get(Uri.parse('$baseUrl/me'), headers: headers)
+          .timeout(const Duration(seconds: 7));
 
-          if (profileBody is Map<String, dynamic>) {
-            userData = profileBody['data'] ?? profileBody['user'] ?? profileBody;
-          }
-
-          if (userData != null) {
-            adminName = (userData['name'] ?? "Admin").toString();
-            allowedLokasiIds.clear();
-
-            // 🎯 FIXED UTAMA: Menangkap array lokasi_user bersih dari backend baru
-            var lokasiUserRaw = userData['lokasi_user'] ?? userData['perkim_lokasi_user'] ?? userData['lokasi_users'];
-
-            if (lokasiUserRaw is List) {
-              for (var item in lokasiUserRaw) {
-                if (item is int) {
-                  // Jika berupa array integer langsung [2, 3]
-                  if (!allowedLokasiIds.contains(item)) {
-                    allowedLokasiIds.add(item);
-                  }
-                } else if (item is Map) {
-                  // Antisipasi jika berupa struktur objek di masa depan [{lokasi_id: 2}]
-                  int? idLoc = _safeParseInt(item['lokasi_id'] ?? item['id']);
-                  if (idLoc != null && !allowedLokasiIds.contains(idLoc)) {
-                    allowedLokasiIds.add(idLoc);
-                  }
-                }
-              }
-            } else if (lokasiUserRaw is Map) {
-              int? idLoc = _safeParseInt(lokasiUserRaw['lokasi_id'] ?? lokasiUserRaw['id']);
-              if (idLoc != null && !allowedLokasiIds.contains(idLoc)) {
-                allowedLokasiIds.add(idLoc);
-              }
-            }
-
-            // Fallback pendukung: Menggunakan single lokasi_id jika array di atas kosong
-            if (allowedLokasiIds.isEmpty && userData['lokasi_id'] != null) {
-              int? idLoc = _safeParseInt(userData['lokasi_id']);
-              if (idLoc != null) allowedLokasiIds.add(idLoc);
-            }
-
-            debugPrint("🔒 Hak Akses Berhasil Dikunci Berdasarkan perkim_lokasi_user ID: $allowedLokasiIds");
-          }
-        }
-      } catch (e) {
-        debugPrint("Gagal mengurai sesi profil: $e");
+      // Jika token tidak valid / kedaluwarsa, lemparkan eror otentikasi
+      if (resProfile.statusCode == 401) {
+        throw 'Unauthenticated';
       }
 
-      // 2. Ambil Data Paralel dari API Laravel
+      if (resProfile.statusCode == 200) {
+        final dynamic profileBody = json.decode(resProfile.body);
+        Map<String, dynamic>? userData;
+
+        if (profileBody is Map<String, dynamic>) {
+          userData = profileBody['data'] ?? profileBody['user'] ?? profileBody;
+        }
+
+        if (userData != null) {
+          adminName = (userData['name'] ?? "Admin").toString();
+          allowedLokasiIds.clear();
+
+          var lokasiUserRaw = userData['lokasi_user'] ?? userData['perkim_lokasi_user'] ?? userData['lokasi_users'];
+
+          if (lokasiUserRaw is List) {
+            for (var item in lokasiUserRaw) {
+              if (item is int) {
+                if (!allowedLokasiIds.contains(item)) {
+                  allowedLokasiIds.add(item);
+                }
+              } else if (item is Map) {
+                int? idLoc = _safeParseInt(item['lokasi_id'] ?? item['id']);
+                if (idLoc != null && !allowedLokasiIds.contains(idLoc)) {
+                  allowedLokasiIds.add(idLoc);
+                }
+              }
+            }
+          } else if (lokasiUserRaw is Map) {
+            int? idLoc = _safeParseInt(lokasiUserRaw['lokasi_id'] ?? lokasiUserRaw['id']);
+            if (idLoc != null && !allowedLokasiIds.contains(idLoc)) {
+              allowedLokasiIds.add(idLoc);
+            }
+          }
+
+          if (allowedLokasiIds.isEmpty && userData['lokasi_id'] != null) {
+            int? idLoc = _safeParseInt(userData['lokasi_id']);
+            if (idLoc != null) allowedLokasiIds.add(idLoc);
+          }
+
+          debugPrint("🔒 Hak Akses Berhasil Dikunci Berdasarkan perkim_lokasi_user ID: $allowedLokasiIds");
+        }
+      } else {
+        // Jika server mengembalikan status selain 200/401 (misal 500 / 502 HTML error)
+        throw 'Server Error Profile Status: ${resProfile.statusCode}';
+      }
+
+      // =========================================================================
+      // 2. AMBIL DATA PARALEL DARI API LARAVEL
+      // =========================================================================
       final responses = await Future.wait([
         http.get(Uri.parse('$baseUrl/lokasi-hirarki'), headers: headers),
         http.get(Uri.parse('$baseUrl/pendaftar'), headers: headers),
-      ]);
+      ].map((future) => future.timeout(const Duration(seconds: 7)))); // Terapkan perlindungan timeout ke semua request paralel
 
-      // 3. Parsing Data Hirarki Lokasi & Kontrak
+      // =========================================================================
+      // 3. PARSING DATA HIRARKI LOKASI & KONTRAK
+      // =========================================================================
       if (responses[0].statusCode == 200) {
         final Map<String, dynamic> body = json.decode(responses[0].body);
         _processLokasiHirarki(body['data'] ?? body);
+      } else {
+        throw 'Server Error Lokasi Status: ${responses[0].statusCode}';
       }
 
-      // 4. Parsing Data Antrean Wawancara
+      // =========================================================================
+      // 4. PARSING DATA ANTREAN WAWANCARA
+      // =========================================================================
       if (responses[1].statusCode == 200) {
         final dynamic body = json.decode(responses[1].body);
         _processPendaftarWawancara(body['data'] ?? body);
+      } else {
+        throw 'Server Error Pendaftar Status: ${responses[1].statusCode}';
       }
 
     } catch (e) {
-      debugPrint("Fatal Exception Dashboard Logic: $e");
+      debugPrint("❌ Fatal Exception Dashboard Logic caught: $e");
+      // 🎯 FIX UTAMA: Melempar kembali (rethrow) error agar ditangkap blok try-catch di UI DashboardScreen
+      rethrow;
     } finally {
       isLoading = false;
       _notify();
@@ -173,9 +188,6 @@ class DashboardLogic {
     daftarWawancara = [];
   }
 
-  // =========================================================================
-  // 🏢 PROCESS DATA HIRARKI (MENYARING BERDASARKAN SEJUMLAH ID DI PIVOT)
-  // =========================================================================
   void _processLokasiHirarki(dynamic lokasiUserList) {
     if (lokasiUserList == null) return;
 
@@ -196,10 +208,9 @@ class DashboardLogic {
 
       int? currentLokasiId = _safeParseInt(lokasi['id'] ?? item['lokasi_id']);
 
-      // 🎯 FILTER UTAMA: Validasi kecocokan ID Lokasi dengan Hak Akses User di Pivot
       if (allowedLokasiIds.isNotEmpty && currentLokasiId != null) {
         if (!allowedLokasiIds.contains(currentLokasiId)) {
-          continue; // Lewati lokasi yang tidak terdaftar di hak akses user ini
+          continue;
         }
       }
 
@@ -319,9 +330,6 @@ class DashboardLogic {
     }
   }
 
-  // =========================================================================
-  // 📋 FILTER DATA PENDAFTAR BERDASARKAN MULTI ID DI PIVOT HAK AKSES
-  // =========================================================================
   void _processPendaftarWawancara(dynamic pendaftarList) {
     if (pendaftarList == null || pendaftarList is! List) return;
 
@@ -340,7 +348,6 @@ class DashboardLogic {
         dynamic lokasiRaw = p['lokasi'];
         int? pendaftarLocationsId = _safeParseInt(p['lokasi_id'] ?? (lokasiRaw is Map ? lokasiRaw['id'] : null));
 
-        // Cek kecocokan list id pivot
         if (pendaftarLocationsId != null && !allowedLokasiIds.contains(pendaftarLocationsId)) {
           continue;
         }
