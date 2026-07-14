@@ -25,15 +25,19 @@ class DashboardLogic {
   int unitKosong = 0;
   int kontrakAkanHabis = 0;
 
+  // 🎯 Variabel global penampung Unit Perbaikan (status_jual == 0 atau 'perbaikan')
+  int unitPerbaikan = 0;
+
   // Tempat menyimpan hasil rincian breakdown data per ruko/rusunawa khusus Pimpinan
   List<Map<String, dynamic>> statistikPerLokasi = [];
 
-  // Demografi Umur Penghuni
+  // Demografi Umur Penghuni (Kategori Lansia & Manula Terpisah secara Presisi)
   int jmlBalita = 0;
   int jmlAnak = 0;
   int jmlRemaja = 0;
   int jmlDewasa = 0;
-  int jmlLansia = 0;
+  int jmlLansia = 0;  // Lansia (46 - 59 tahun)
+  int jmlManula = 0;  // Manula (>= 60 tahun)
 
   // Ringkasan Jadwal Antrean Wawancara Calon Penghuni
   int totalAntreanWawancancara = 0;
@@ -43,7 +47,7 @@ class DashboardLogic {
   int wawancaraBesok = 0;
   int wawancaraMingguIni = 0;
 
-  // 🎯 Menyimpan seluruh daftar wawancara murni hasil fetch API untuk proses filter di UI
+  // Menyimpan seluruh daftar wawancara murni hasil fetch API untuk proses filter di UI
   List<Map<String, dynamic>> semuaDaftarWawancaraMurni = [];
 
   Map<String, String> _getHeaders(String? explicitToken) {
@@ -64,7 +68,6 @@ class DashboardLogic {
     return int.tryParse(strValue);
   }
 
-  /// 🎯 Fungsi baru untuk mengambil list wawancara yang telah difilter berdasarkan lokasi dari UI
   List<Map<String, dynamic>> getFilteredWawancara(int? selectedLokasiId) {
     if (selectedLokasiId == null) {
       return semuaDaftarWawancaraMurni;
@@ -170,6 +173,7 @@ class DashboardLogic {
     totalUnit = 0;
     unitTerisi = 0;
     unitKosong = 0;
+    unitPerbaikan = 0; // Reset unit perbaikan
     totalPenghuni = 0;
     kontrakAkanHabis = 0;
     statistikPerLokasi = [];
@@ -178,13 +182,14 @@ class DashboardLogic {
     jmlRemaja = 0;
     jmlDewasa = 0;
     jmlLansia = 0;
+    jmlManula = 0;
     totalAntreanWawancancara = 0;
     wawancaraTerlewatAlert = 0;
     belumDiwawancara = 0;
     wawancaraHariIni = 0;
     wawancaraBesok = 0;
     wawancaraMingguIni = 0;
-    semuaDaftarWawancaraMurni = []; // Reset penampung data wawancara
+    semuaDaftarWawancaraMurni = [];
   }
 
   void _processLokasiHirarki(dynamic lokasiUserList) {
@@ -207,7 +212,6 @@ class DashboardLogic {
 
       int? currentLokasiId = _safeParseInt(lokasi['id']);
 
-      // Jika bukan pimpinan, lakukan pembatasan filter lokasi_id
       if (!isPimpinan && allowedLokasiIds.isNotEmpty && currentLokasiId != null) {
         if (!allowedLokasiIds.contains(currentLokasiId)) {
           continue;
@@ -217,10 +221,15 @@ class DashboardLogic {
       String namaLokasi = lokasi['nama_lokasi'] ?? 'Rusunawa';
       int unitTerisiLokasi = 0;
       int unitKosongLokasi = 0;
+      int unitPerbaikanLokasi = 0; // Penampung lokal per lokasi
       int totalUnitLokasi = 0;
       int penghuniLokasi = 0;
 
-      var gedungList = lokasi['gedung'] ?? lokasi['gedungs'];
+      // Sinkron dengan LocationController@index (backend) yang mengirim key 'gedung' & 'unit'
+      // (singular). Fallback 'gedungs' / 'units' tetap dipertahankan untuk kompatibilitas
+      // ke belakang seandainya backend suatu saat berubah balik memakai nama relasi Eloquent.
+      var staticGedungs = lokasi['gedung'] ?? lokasi['gedungs'];
+      var gedungList = staticGedungs;
       if (gedungList != null && gedungList is List) {
         for (var gedung in gedungList) {
           if (gedung == null || gedung is! Map) continue;
@@ -231,77 +240,111 @@ class DashboardLogic {
           for (var unit in unitList) {
             if (unit == null || unit is! Map) continue;
 
-            bool isUnitTerisi = false;
-            if (unit['is_terisi'] != null) {
-              var rawIsTerisi = unit['is_terisi'];
-              isUnitTerisi = (rawIsTerisi == 1 || rawIsTerisi == true || rawIsTerisi.toString() == '1');
-            }
+            // 🎯 PERBAIKAN EVALUASI: Deteksi status_jual secara aman (bisa int, String, atau boolean)
+            // Backend (LocationController@index) mengirim nilai kolom `status_jual` APA ADANYA
+            // dari database (varchar '0' / '1'), jadi jalur `else` (String) di bawah ini yang
+            // akan selalu dipakai untuk kasus normal — tapi int/bool tetap dijaga untuk jaga-jaga.
+            var statusJualRaw = unit['status_jual'];
+            bool isPerbaikan = false;
 
-            var kontraks = unit['kontrak'] ?? unit['kontraks'];
-            dynamic activeContract;
-
-            if (kontraks != null && kontraks is List) {
-              for (var k in kontraks) {
-                if (k == null || k is! Map) continue;
-                var rawStatus = k['status_kontrak'];
-                if (rawStatus == 1 || rawStatus == true || rawStatus.toString() == '1') {
-                  activeContract = k;
-                  break;
+            if (statusJualRaw != null) {
+              if (statusJualRaw is int && statusJualRaw == 0) {
+                isPerbaikan = true;
+              } else if (statusJualRaw is bool && statusJualRaw == false) {
+                isPerbaikan = true;
+              } else {
+                String statusStr = statusJualRaw.toString().trim().toLowerCase();
+                if (statusStr == '0' || statusStr == 'perbaikan' || statusStr == 'false') {
+                  isPerbaikan = true;
                 }
               }
             }
 
-            if (isUnitTerisi || activeContract != null) {
-              unitTerisi++;
-              unitTerisiLokasi++;
-
-              if (activeContract != null && activeContract['tgl_akhir'] != null) {
-                try {
-                  String tglEnding = activeContract['tgl_akhir'].toString().split(' ')[0];
-                  DateTime tglAkhir = DateTime.parse(tglEnding);
-                  int sisaHari = tglAkhir.difference(todayZeroHour).inDays;
-                  if (sisaHari >= 0 && sisaHari <= 7) {
-                    kontrakAkanHabis++;
-                  }
-                } catch (_) {}
-              }
-
-              if (activeContract != null) {
-                List<String> penghuniKeys = ['penghuni_satu', 'penghuni_dua', 'penghuni_tiga', 'penghuni_empat', 'penghuni_id1'];
-                for (var key in penghuniKeys) {
-                  if (activeContract[key] != null) {
-                    _checkAndParsePenghuni(activeContract[key]);
-                    penghuniLokasi++;
-                  }
-                }
-
-                var listPenghuniDirect = activeContract['penghuni'] ?? activeContract['penghunis'];
-                if (listPenghuniDirect != null) {
-                  _checkAndParsePenghuni(listPenghuniDirect);
-                  if (listPenghuniDirect is List) {
-                    penghuniLokasi += listPenghuniDirect.length;
-                  } else {
-                    penghuniLokasi++;
-                  }
-                }
-              }
+            if (isPerbaikan) {
+              unitPerbaikan++;
+              unitPerbaikanLokasi++;
             } else {
-              unitKosong++;
-              unitKosongLokasi++;
+              // Jika status_jual bernilai selain perbaikan (aktif/tersedia), hitung status unit seperti biasa (terisi / kosong)
+              bool isUnitTerisi = false;
+              if (unit['is_terisi'] != null) {
+                var rawIsTerisi = unit['is_terisi'];
+                isUnitTerisi = (rawIsTerisi == 1 ||
+                    rawIsTerisi == true ||
+                    rawIsTerisi.toString().trim().toLowerCase() == '1' ||
+                    rawIsTerisi.toString().trim().toLowerCase() == 'true');
+              }
+
+              var kontraks = unit['kontrak'] ?? unit['kontraks'];
+              dynamic activeContract;
+
+              if (kontraks != null && kontraks is List) {
+                for (var k in kontraks) {
+                  if (k == null || k is! Map) continue;
+                  var rawStatus = k['status_kontrak'];
+                  if (rawStatus == 1 ||
+                      rawStatus == true ||
+                      rawStatus.toString().trim() == '1') {
+                    activeContract = k;
+                    break;
+                  }
+                }
+              }
+
+              if (isUnitTerisi || activeContract != null) {
+                unitTerisi++;
+                unitTerisiLokasi++;
+
+                if (activeContract != null && activeContract['tgl_akhir'] != null) {
+                  try {
+                    String tglEnding = activeContract['tgl_akhir'].toString().split(' ')[0];
+                    DateTime tglAkhir = DateTime.parse(tglEnding);
+                    int sisaHari = tglAkhir.difference(todayZeroHour).inDays;
+                    if (sisaHari >= 0 && sisaHari <= 7) {
+                      kontrakAkanHabis++;
+                    }
+                  } catch (_) {}
+                }
+
+                if (activeContract != null) {
+                  List<String> penghuniKeys = ['penghuni_satu', 'penghuni_dua', 'penghuni_tiga', 'penghuni_empat', 'penghuni_id1'];
+                  for (var key in penghuniKeys) {
+                    if (activeContract[key] != null) {
+                      _checkAndParsePenghuni(activeContract[key]);
+                      penghuniLokasi++;
+                    }
+                  }
+
+                  var listPenghuniDirect = activeContract['penghuni'] ?? activeContract['penghunis'];
+                  if (listPenghuniDirect != null) {
+                    _checkAndParsePenghuni(listPenghuniDirect);
+                    if (listPenghuniDirect is List) {
+                      penghuniLokasi += listPenghuniDirect.length;
+                    } else {
+                      penghuniLokasi++;
+                    }
+                  }
+                }
+              } else {
+                unitKosong++;
+                unitKosongLokasi++;
+              }
             }
+
+            // Tetap dihitung ke dalam total unit agar data sinkron di grafik/UI
             totalUnit++;
             totalUnitLokasi++;
           }
         }
       }
 
-      // Menyimpan data statistik internal per lokasi tunggal
+      // Menyimpan data statistik internal per lokasi tunggal (termasuk unit_perbaikan)
       statistikPerLokasi.add({
         "id": currentLokasiId,
         "nama_lokasi": namaLokasi,
         "total_unit": totalUnitLokasi,
         "unit_terisi": unitTerisiLokasi,
         "unit_kosong": unitKosongLokasi,
+        "unit_perbaikan": unitPerbaikanLokasi, // Ditambahkan ke breakdown lokasi pimpinan
         "total_penghuni": penghuniLokasi,
       });
     }
@@ -326,24 +369,38 @@ class DashboardLogic {
       String tglLahirRaw = p['tgl_lahir'].toString().split(' ')[0];
       DateTime tglLahir = DateTime.parse(tglLahirRaw);
 
-      int tahunSekarang = 2026;
-      int umur = tahunSekarang - tglLahir.year;
+      DateTime target2026 = DateTime(2026, DateTime.now().month, DateTime.now().day);
 
-      DateTime now2026 = DateTime(2026, DateTime.now().month, DateTime.now().day);
-      if (now2026.month < tglLahir.month || (now2026.month == tglLahir.month && now2026.day < tglLahir.day)) {
+      // Hitung perbedaan tahun dasar
+      int umur = target2026.year - tglLahir.year;
+
+      // Evaluasi apakah tanggal lahir hari ini di tahun 2026 sudah terlewati atau belum
+      if (target2026.month < tglLahir.month ||
+          (target2026.month == tglLahir.month && target2026.day < tglLahir.day)) {
         umur--;
       }
 
-      if (umur <= 5) {
+      // Penentuan Kategori Umur Presisi (Termasuk batas ketat usia Balita/Anak di umur 5 tahun)
+      if (umur < 5) {
         jmlBalita++;
+      } else if (umur == 5) {
+        // Cek secara presisi apakah hari ini sudah melewati hari ulang tahun ke-5 atau belum
+        DateTime tglUltahKe5 = DateTime(tglLahir.year + 5, tglLahir.month, tglLahir.day);
+        if (target2026.isAfter(tglUltahKe5)) {
+          jmlAnak++; // Lebih dari 5 tahun (walau 1 hari) masuk kategori Anak
+        } else {
+          jmlBalita++; // Tepat umur 5 tahun ke bawah masuk Balita
+        }
       } else if (umur <= 11) {
         jmlAnak++;
       } else if (umur <= 25) {
         jmlRemaja++;
       } else if (umur <= 45) {
         jmlDewasa++;
-      } else {
+      } else if (umur <= 59) {
         jmlLansia++;
+      } else {
+        jmlManula++; // >= 60 Tahun (Manula)
       }
     } catch (e) {
       debugPrint("Gagal parse umur penghuni: $e");
@@ -356,10 +413,7 @@ class DashboardLogic {
     final DateTime now = DateTime.now();
     final DateTime targetHariIni = DateTime(2026, now.month, now.day);
 
-    List<Map<String, dynamic>> tempOverdue = [];
-    List<Map<String, dynamic>> tempHariIni = [];
-    List<Map<String, dynamic>> tempBesok = [];
-    List<Map<String, dynamic>> tempMasaDepan = [];
+    List<Map<String, dynamic>> listWawancaraDiproses = [];
 
     for (var p in pendaftarList) {
       if (p == null || p is! Map) continue;
@@ -416,54 +470,60 @@ class DashboardLogic {
             belumDiwawancara++;
           }
 
-          var itemWawancara = {
+          listWawancaraDiproses.add({
             "nama": p['nama'] ?? "Tanpa Nama",
             "tgl_wawancara": labelTanggal,
             "jam": p['jam_wawancara'] ?? p['jam'] ?? "--:-- WIB",
             "lokasi_tujuan": namaLokasiTujuan,
-            "lokasi_id": pendaftarLocationsId, // 🎯 Disimpan untuk filtering di UI
+            "lokasi_id": pendaftarLocationsId,
             "is_overdue": isOverdue,
-          };
-
-          if (isOverdue) {
-            tempOverdue.add(itemWawancara);
-          } else if (selisihHari == 0) {
-            tempHariIni.add(itemWawancara);
-          } else if (selisihHari == 1) {
-            tempBesok.add(itemWawancara);
-          } else {
-            tempMasaDepan.add(itemWawancara);
-          }
+            "tgl_datetime": tglWawancaraMurni,
+            "selisih_hari": selisihHari,
+          });
 
         } catch (e) {
-          tempMasaDepan.add({
+          listWawancaraDiproses.add({
             "nama": p['nama'] ?? "Tanpa Nama",
             "tgl_wawancara": "Format Salah",
             "jam": p['jam_wawancara'] ?? p['jam'] ?? "--:-- WIB",
             "lokasi_tujuan": namaLokasiTujuan,
             "lokasi_id": pendaftarLocationsId,
             "is_overdue": false,
+            "tgl_datetime": DateTime(2099, 12, 31),
+            "selisih_hari": 9999,
           });
         }
       } else {
-        tempMasaDepan.add({
+        listWawancaraDiproses.add({
           "nama": p['nama'] ?? "Tanpa Nama",
           "tgl_wawancara": "Belum Terjadwal",
           "jam": p['jam_wawancara'] ?? p['jam'] ?? "--:-- WIB",
           "lokasi_tujuan": namaLokasiTujuan,
           "lokasi_id": pendaftarLocationsId,
           "is_overdue": false,
+          "tgl_datetime": DateTime(2099, 12, 31),
+          "selisih_hari": 9999,
         });
       }
     }
 
-    // Menggabungkan urutan data secara sinkron
-    semuaDaftarWawancaraMurni = [
-      ...tempOverdue,
-      ...tempHariIni,
-      ...tempBesok,
-      ...tempMasaDepan
-    ];
+    // SINKRONISASI FILTER: Urutkan dari jadwal paling lama ke paling baru (kronologis ascending)
+    listWawancaraDiproses.sort((a, b) {
+      final tglA = a['tgl_datetime'] as DateTime;
+      final tglB = b['tgl_datetime'] as DateTime;
+      return tglA.compareTo(tglB);
+    });
+
+    semuaDaftarWawancaraMurni = listWawancaraDiproses.map((e) {
+      return {
+        "nama": e['nama'],
+        "tgl_wawancara": e['tgl_wawancara'],
+        "jam": e['jam'],
+        "lokasi_tujuan": e['lokasi_tujuan'],
+        "lokasi_id": e['lokasi_id'],
+        "is_overdue": e['is_overdue'],
+      };
+    }).toList();
   }
 
   void _notify() => onUpdate?.call();
