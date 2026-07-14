@@ -10,35 +10,41 @@ class DashboardLogic {
 
   DashboardLogic({this.authToken, this.onUpdate});
 
-  // State operasional
+  // State operasional utama
   bool isLoading = false;
   String adminName = "Admin";
+  bool isPimpinan = false; // Flag penanda role pimpinan
 
-  // Menyimpan daftar lokasi_id dari tabel pivot perkim_lokasi_user
+  // Menyimpan daftar lokasi_id dari hak akses user biasa
   List<int> allowedLokasiIds = [];
 
-  // Statistik Properti & Penghuni
+  // Statistik Properti & Penghuni Akumulatif (Global)
   int totalPenghuni = 0;
   int totalUnit = 0;
   int unitTerisi = 0;
   int unitKosong = 0;
   int kontrakAkanHabis = 0;
 
-  // Demografi Umur
+  // Tempat menyimpan hasil rincian breakdown data per ruko/rusunawa khusus Pimpinan
+  List<Map<String, dynamic>> statistikPerLokasi = [];
+
+  // Demografi Umur Penghuni
   int jmlBalita = 0;
   int jmlAnak = 0;
   int jmlRemaja = 0;
   int jmlDewasa = 0;
   int jmlLansia = 0;
 
-  // Antrean Wawancara
+  // Ringkasan Jadwal Antrean Wawancara Calon Penghuni
   int totalAntreanWawancancara = 0;
   int wawancaraTerlewatAlert = 0;
   int belumDiwawancara = 0;
   int wawancaraHariIni = 0;
   int wawancaraBesok = 0;
   int wawancaraMingguIni = 0;
-  List<Map<String, dynamic>> daftarWawancara = [];
+
+  // 🎯 Menyimpan seluruh daftar wawancara murni hasil fetch API untuk proses filter di UI
+  List<Map<String, dynamic>> semuaDaftarWawancaraMurni = [];
 
   Map<String, String> _getHeaders(String? explicitToken) {
     final tokenToUse = explicitToken ?? authToken;
@@ -58,6 +64,16 @@ class DashboardLogic {
     return int.tryParse(strValue);
   }
 
+  /// 🎯 Fungsi baru untuk mengambil list wawancara yang telah difilter berdasarkan lokasi dari UI
+  List<Map<String, dynamic>> getFilteredWawancara(int? selectedLokasiId) {
+    if (selectedLokasiId == null) {
+      return semuaDaftarWawancaraMurni;
+    }
+    return semuaDaftarWawancaraMurni
+        .where((wawancara) => wawancara['lokasi_id'] == selectedLokasiId)
+        .toList();
+  }
+
   Future<void> fetchDashboardData({String? updatedToken}) async {
     if (updatedToken != null) {
       authToken = updatedToken;
@@ -70,16 +86,14 @@ class DashboardLogic {
     final Map<String, String> headers = _getHeaders(updatedToken);
 
     try {
-      debugPrint("--- REFRESH DATA DASHBOARD SIRAJA (TAHUN 2026) ---");
+      debugPrint("--- REFRESH DATA DASHBOARD PERKIM ---");
 
       // =========================================================================
-      // 1. AMBIL PROFIL USER & EKSTRAKSI RELASI PIVOT
+      // 1. CEK IDENTITAS USER DAN VALIDASI ROLE
       // =========================================================================
-      // Ditambahkan timeout perlindungan 7 detik agar tidak gantung saat Laragon beku
       final resProfile = await http.get(Uri.parse('$baseUrl/me'), headers: headers)
           .timeout(const Duration(seconds: 7));
 
-      // Jika token tidak valid / kedaluwarsa, lemparkan eror otentikasi
       if (resProfile.statusCode == 401) {
         throw 'Unauthenticated';
       }
@@ -89,57 +103,42 @@ class DashboardLogic {
         Map<String, dynamic>? userData;
 
         if (profileBody is Map<String, dynamic>) {
-          userData = profileBody['data'] ?? profileBody['user'] ?? profileBody;
+          userData = profileBody['data'];
         }
 
         if (userData != null) {
           adminName = (userData['name'] ?? "Admin").toString();
+
+          // Deteksi apakah user login bermode pimpinan
+          String roleUser = (userData['role'] ?? '').toString().toLowerCase();
+          isPimpinan = (roleUser == 'pimpinan');
+
           allowedLokasiIds.clear();
 
-          var lokasiUserRaw = userData['lokasi_user'] ?? userData['perkim_lokasi_user'] ?? userData['lokasi_users'];
-
-          if (lokasiUserRaw is List) {
-            for (var item in lokasiUserRaw) {
-              if (item is int) {
-                if (!allowedLokasiIds.contains(item)) {
-                  allowedLokasiIds.add(item);
-                }
-              } else if (item is Map) {
-                int? idLoc = _safeParseInt(item['lokasi_id'] ?? item['id']);
-                if (idLoc != null && !allowedLokasiIds.contains(idLoc)) {
-                  allowedLokasiIds.add(idLoc);
-                }
-              }
-            }
-          } else if (lokasiUserRaw is Map) {
-            int? idLoc = _safeParseInt(lokasiUserRaw['lokasi_id'] ?? lokasiUserRaw['id']);
-            if (idLoc != null && !allowedLokasiIds.contains(idLoc)) {
+          // Jika petugas biasa, filter lokasi aktif dimuat. Jika pimpinan, load seluruh lokasi
+          if (!isPimpinan && userData['lokasi_id'] != null) {
+            int? idLoc = _safeParseInt(userData['lokasi_id']);
+            if (idLoc != null) {
               allowedLokasiIds.add(idLoc);
             }
           }
 
-          if (allowedLokasiIds.isEmpty && userData['lokasi_id'] != null) {
-            int? idLoc = _safeParseInt(userData['lokasi_id']);
-            if (idLoc != null) allowedLokasiIds.add(idLoc);
-          }
-
-          debugPrint("🔒 Hak Akses Berhasil Dikunci Berdasarkan perkim_lokasi_user ID: $allowedLokasiIds");
+          debugPrint("🔒 Hak Akses Terbuka: ${isPimpinan ? 'Pimpinan (Semua Lokasi Terbuka)' : 'Petugas Terbatas ($allowedLokasiIds)'}");
         }
       } else {
-        // Jika server mengembalikan status selain 200/401 (misal 500 / 502 HTML error)
         throw 'Server Error Profile Status: ${resProfile.statusCode}';
       }
 
       // =========================================================================
-      // 2. AMBIL DATA PARALEL DARI API LARAVEL
+      // 2. PARALEL REQUEST DATA HIRARKI DAN PENDAFTAR
       // =========================================================================
       final responses = await Future.wait([
         http.get(Uri.parse('$baseUrl/lokasi-hirarki'), headers: headers),
         http.get(Uri.parse('$baseUrl/pendaftar'), headers: headers),
-      ].map((future) => future.timeout(const Duration(seconds: 7)))); // Terapkan perlindungan timeout ke semua request paralel
+      ].map((future) => future.timeout(const Duration(seconds: 7))));
 
       // =========================================================================
-      // 3. PARSING DATA HIRARKI LOKASI & KONTRAK
+      // 3. PARSING UNIT, GEDUNG, DAN PENGHUNI KONTRAK
       // =========================================================================
       if (responses[0].statusCode == 200) {
         final Map<String, dynamic> body = json.decode(responses[0].body);
@@ -149,7 +148,7 @@ class DashboardLogic {
       }
 
       // =========================================================================
-      // 4. PARSING DATA ANTREAN WAWANCARA
+      // 4. PARSING ANTREAN WAWANCARA
       // =========================================================================
       if (responses[1].statusCode == 200) {
         final dynamic body = json.decode(responses[1].body);
@@ -159,8 +158,7 @@ class DashboardLogic {
       }
 
     } catch (e) {
-      debugPrint("❌ Fatal Exception Dashboard Logic caught: $e");
-      // 🎯 FIX UTAMA: Melempar kembali (rethrow) error agar ditangkap blok try-catch di UI DashboardScreen
+      debugPrint("❌ Exception Dashboard Logic: $e");
       rethrow;
     } finally {
       isLoading = false;
@@ -174,6 +172,7 @@ class DashboardLogic {
     unitKosong = 0;
     totalPenghuni = 0;
     kontrakAkanHabis = 0;
+    statistikPerLokasi = [];
     jmlBalita = 0;
     jmlAnak = 0;
     jmlRemaja = 0;
@@ -185,7 +184,7 @@ class DashboardLogic {
     wawancaraHariIni = 0;
     wawancaraBesok = 0;
     wawancaraMingguIni = 0;
-    daftarWawancara = [];
+    semuaDaftarWawancaraMurni = []; // Reset penampung data wawancara
   }
 
   void _processLokasiHirarki(dynamic lokasiUserList) {
@@ -201,89 +200,110 @@ class DashboardLogic {
     final DateTime todayZeroHour = DateTime(2026, DateTime.now().month, DateTime.now().day);
 
     for (var item in rawList) {
-      if (item == null) continue;
+      if (item == null || item is! Map) continue;
 
-      var lokasi = (item['lokasi'] != null && item['lokasi'] is Map) ? item['lokasi'] : item;
-      if (lokasi is! Map) continue;
+      var lokasi = item['lokasi'];
+      if (lokasi == null || lokasi is! Map) continue;
 
-      int? currentLokasiId = _safeParseInt(lokasi['id'] ?? item['lokasi_id']);
+      int? currentLokasiId = _safeParseInt(lokasi['id']);
 
-      if (allowedLokasiIds.isNotEmpty && currentLokasiId != null) {
+      // Jika bukan pimpinan, lakukan pembatasan filter lokasi_id
+      if (!isPimpinan && allowedLokasiIds.isNotEmpty && currentLokasiId != null) {
         if (!allowedLokasiIds.contains(currentLokasiId)) {
           continue;
         }
       }
 
+      String namaLokasi = lokasi['nama_lokasi'] ?? 'Rusunawa';
+      int unitTerisiLokasi = 0;
+      int unitKosongLokasi = 0;
+      int totalUnitLokasi = 0;
+      int penghuniLokasi = 0;
+
       var gedungList = lokasi['gedung'] ?? lokasi['gedungs'];
-      if (gedungList == null || gedungList is! List) continue;
+      if (gedungList != null && gedungList is List) {
+        for (var gedung in gedungList) {
+          if (gedung == null || gedung is! Map) continue;
 
-      for (var gedung in gedungList) {
-        if (gedung == null || gedung is! Map) continue;
+          var unitList = gedung['unit'] ?? gedung['units'];
+          if (unitList == null || unitList is! List) continue;
 
-        var unitList = gedung['unit'] ?? gedung['units'];
-        if (unitList == null || unitList is! List) continue;
+          for (var unit in unitList) {
+            if (unit == null || unit is! Map) continue;
 
-        for (var unit in unitList) {
-          if (unit == null || unit is! Map) continue;
-
-          var kontraks = unit['kontrak'] ?? unit['kontraks'];
-          dynamic activeContract;
-
-          if (kontraks != null && kontraks is List) {
-            for (var k in kontraks) {
-              if (k == null || k is! Map) continue;
-
-              var rawStatus = k['status_kontrak'];
-              bool isActive = false;
-
-              if (rawStatus is int) {
-                isActive = (rawStatus == 1);
-              } else if (rawStatus is bool) {
-                isActive = rawStatus;
-              } else if (rawStatus != null) {
-                String strStatus = rawStatus.toString().trim().toLowerCase();
-                isActive = (strStatus == '1' || strStatus == 'true');
-              }
-
-              if (isActive) {
-                activeContract = k;
-                break;
-              }
+            bool isUnitTerisi = false;
+            if (unit['is_terisi'] != null) {
+              var rawIsTerisi = unit['is_terisi'];
+              isUnitTerisi = (rawIsTerisi == 1 || rawIsTerisi == true || rawIsTerisi.toString() == '1');
             }
-          }
 
-          if (activeContract != null) {
-            unitTerisi++;
+            var kontraks = unit['kontrak'] ?? unit['kontraks'];
+            dynamic activeContract;
 
-            if (activeContract['tgl_akhir'] != null) {
-              try {
-                String tglEnding = activeContract['tgl_akhir'].toString().split(' ')[0];
-                DateTime tglAkhir = DateTime.parse(tglEnding);
-                int sisaHari = tglAkhir.difference(todayZeroHour).inDays;
-                if (sisaHari >= 0 && sisaHari <= 7) {
-                  kontrakAkanHabis++;
+            if (kontraks != null && kontraks is List) {
+              for (var k in kontraks) {
+                if (k == null || k is! Map) continue;
+                var rawStatus = k['status_kontrak'];
+                if (rawStatus == 1 || rawStatus == true || rawStatus.toString() == '1') {
+                  activeContract = k;
+                  break;
                 }
-              } catch (_) {}
-            }
-
-            for (int i = 1; i <= 4; i++) {
-              var penghuniData = activeContract['penghuni_id$i'] ?? activeContract['penghuni$i'];
-              if (penghuniData != null) {
-                _checkAndParsePenghuni(penghuniData);
               }
             }
 
-            var listPenghuniDirect = activeContract['penghuni'] ?? activeContract['penghunis'];
-            if (listPenghuniDirect != null) {
-              _checkAndParsePenghuni(listPenghuniDirect);
-            }
+            if (isUnitTerisi || activeContract != null) {
+              unitTerisi++;
+              unitTerisiLokasi++;
 
-          } else {
-            unitKosong++;
+              if (activeContract != null && activeContract['tgl_akhir'] != null) {
+                try {
+                  String tglEnding = activeContract['tgl_akhir'].toString().split(' ')[0];
+                  DateTime tglAkhir = DateTime.parse(tglEnding);
+                  int sisaHari = tglAkhir.difference(todayZeroHour).inDays;
+                  if (sisaHari >= 0 && sisaHari <= 7) {
+                    kontrakAkanHabis++;
+                  }
+                } catch (_) {}
+              }
+
+              if (activeContract != null) {
+                List<String> penghuniKeys = ['penghuni_satu', 'penghuni_dua', 'penghuni_tiga', 'penghuni_empat', 'penghuni_id1'];
+                for (var key in penghuniKeys) {
+                  if (activeContract[key] != null) {
+                    _checkAndParsePenghuni(activeContract[key]);
+                    penghuniLokasi++;
+                  }
+                }
+
+                var listPenghuniDirect = activeContract['penghuni'] ?? activeContract['penghunis'];
+                if (listPenghuniDirect != null) {
+                  _checkAndParsePenghuni(listPenghuniDirect);
+                  if (listPenghuniDirect is List) {
+                    penghuniLokasi += listPenghuniDirect.length;
+                  } else {
+                    penghuniLokasi++;
+                  }
+                }
+              }
+            } else {
+              unitKosong++;
+              unitKosongLokasi++;
+            }
+            totalUnit++;
+            totalUnitLokasi++;
           }
-          totalUnit++;
         }
       }
+
+      // Menyimpan data statistik internal per lokasi tunggal
+      statistikPerLokasi.add({
+        "id": currentLokasiId,
+        "nama_lokasi": namaLokasi,
+        "total_unit": totalUnitLokasi,
+        "unit_terisi": unitTerisiLokasi,
+        "unit_kosong": unitKosongLokasi,
+        "total_penghuni": penghuniLokasi,
+      });
     }
   }
 
@@ -326,7 +346,7 @@ class DashboardLogic {
         jmlLansia++;
       }
     } catch (e) {
-      debugPrint("Gagal memproses kalkulasi umur: $e");
+      debugPrint("Gagal parse umur penghuni: $e");
     }
   }
 
@@ -344,10 +364,10 @@ class DashboardLogic {
     for (var p in pendaftarList) {
       if (p == null || p is! Map) continue;
 
-      if (allowedLokasiIds.isNotEmpty) {
-        dynamic lokasiRaw = p['lokasi'];
-        int? pendaftarLocationsId = _safeParseInt(p['lokasi_id'] ?? (lokasiRaw is Map ? lokasiRaw['id'] : null));
+      dynamic lokasiRaw = p['lokasi'];
+      int? pendaftarLocationsId = _safeParseInt(p['lokasi_id'] ?? (lokasiRaw is Map ? lokasiRaw['id'] : null));
 
+      if (!isPimpinan && allowedLokasiIds.isNotEmpty) {
         if (pendaftarLocationsId != null && !allowedLokasiIds.contains(pendaftarLocationsId)) {
           continue;
         }
@@ -355,12 +375,11 @@ class DashboardLogic {
 
       var fieldTanggal = p['tgl_wawancara'] ?? p['tanggal_wawancara'];
 
-      dynamic lokasiObj = p['lokasi'];
-      String namaLokasiTujuan = "Rusun Perkim";
-      if (lokasiObj is Map && lokasiObj['nama_lokasi'] != null) {
-        namaLokasiTujuan = lokasiObj['nama_lokasi'].toString();
-      } else if (lokasiObj is String && lokasiObj.isNotEmpty) {
-        namaLokasiTujuan = lokasiObj;
+      String namaLokasiTujuan = "Rusunawa";
+      if (lokasiRaw is Map && lokasiRaw['nama_lokasi'] != null) {
+        namaLokasiTujuan = lokasiRaw['nama_lokasi'].toString();
+      } else if (lokasiRaw is String && lokasiRaw.isNotEmpty) {
+        namaLokasiTujuan = lokasiRaw;
       }
 
       if (fieldTanggal != null && fieldTanggal.toString().trim().isNotEmpty) {
@@ -402,6 +421,7 @@ class DashboardLogic {
             "tgl_wawancara": labelTanggal,
             "jam": p['jam_wawancara'] ?? p['jam'] ?? "--:-- WIB",
             "lokasi_tujuan": namaLokasiTujuan,
+            "lokasi_id": pendaftarLocationsId, // 🎯 Disimpan untuk filtering di UI
             "is_overdue": isOverdue,
           };
 
@@ -421,6 +441,7 @@ class DashboardLogic {
             "tgl_wawancara": "Format Salah",
             "jam": p['jam_wawancara'] ?? p['jam'] ?? "--:-- WIB",
             "lokasi_tujuan": namaLokasiTujuan,
+            "lokasi_id": pendaftarLocationsId,
             "is_overdue": false,
           });
         }
@@ -430,19 +451,19 @@ class DashboardLogic {
           "tgl_wawancara": "Belum Terjadwal",
           "jam": p['jam_wawancara'] ?? p['jam'] ?? "--:-- WIB",
           "lokasi_tujuan": namaLokasiTujuan,
+          "lokasi_id": pendaftarLocationsId,
           "is_overdue": false,
         });
       }
     }
 
-    List<Map<String, dynamic>> urutanSinkron = [
+    // Menggabungkan urutan data secara sinkron
+    semuaDaftarWawancaraMurni = [
       ...tempOverdue,
       ...tempHariIni,
       ...tempBesok,
       ...tempMasaDepan
     ];
-
-    daftarWawancara = urutanSinkron.take(3).toList();
   }
 
   void _notify() => onUpdate?.call();

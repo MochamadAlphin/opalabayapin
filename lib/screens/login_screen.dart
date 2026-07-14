@@ -105,24 +105,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
 
           // ==========================================
-          // 🎯 PREMIUM GOLD BRAND PATTERN LAYER (FIXED)
-          // Menampilkan warna asli emas murni dari asset gambar lokal tanpa distorsi warna biru.
-          // Opacity disetel ke 0.15 agar teksturnya terlihat anggun namun tidak mengganggu tulisan.
-          // ==========================================
-          Container(
-            width: double.infinity,
-            height: double.infinity,
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage('assets/images/pattern_emas.png'),
-                repeat: ImageRepeat.repeat,
-                opacity: 0.35,
-              ),
-            ),
-          ),
-
-          // ==========================================
-          // 2. MULTI-LAYER GRADASI ULTRA DEEP BLUE HIGH CONTRAST
+          // 🎯 MULTI-LAYER GRADASI ULTRA DEEP BLUE HIGH CONTRAST
           // Membuat bagian atas sangat "biru pekat" agar logo emas memancar,
           // namun memudar secara transparan di area bawah agar gambar gedung tetap hidup.
           // ==========================================
@@ -145,7 +128,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
 
           // ==========================================
-          // 3. KONTEN UTAMA (SCROLLABLE)
+          // 2. KONTEN UTAMA (SCROLLABLE)
           // ==========================================
           SafeArea(
             child: SingleChildScrollView(
@@ -166,15 +149,15 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 20),
 
                   // ==========================================
-                  // 4. WADAH FORM PUTIH FLOATING PREMIUM
+                  // 3. WADAH FORM PUTIH FLOATING PREMIUM
                   // ==========================================
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    padding: const EdgeInsets.symmetric(horizontal: 20), // Disamakan gap-nya dengan Register (20)
                     child: Container(
                       padding: const EdgeInsets.fromLTRB(24, 36, 24, 36),
                       decoration: BoxDecoration(
                         color: Colors.white,
-                        borderRadius: BorderRadius.circular(28),
+                        borderRadius: BorderRadius.circular(28), // Menggunakan lengkungan premium bulat penuh
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withOpacity(0.2),
@@ -294,7 +277,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                           const SizedBox(height: 14),
 
-                          // --- Remember Me Only ---
+                          // --- Remember Me Only (Forgot Password Berhasil Dihapus) ---
                           Row(
                             children: [
                               Theme(
@@ -333,15 +316,15 @@ class _LoginScreenState extends State<LoginScreen> {
                           // --- Tombol Login Utama ---
                           SizedBox(
                             width: double.infinity,
-                            height: 48,
+                            height: 48, // Tinggi tombol yang ideal & kompak ala iOS modern
                             child: ElevatedButton(
-                              onPressed: _isLoading ? null : _handleLogin,
+                              onPressed: _isLoading ? null : _handleLogin, // Mencegah double tap saat sedang loading
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: primaryColor,
                                 elevation: 0,
                                 shadowColor: Colors.transparent,
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
+                                  borderRadius: BorderRadius.circular(12), // Selaras dengan radius input field
                                 ),
                               ),
                               child: _isLoading
@@ -387,7 +370,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 child: Text(
                                   'Daftar Disini',
                                   style: TextStyle(
-                                    color: primaryColor,
+                                    color: primaryColor, // Diubah ke Deep Blue utama agar oranye hilang sepenuhnya
                                     fontWeight: FontWeight.bold,
                                     fontSize: 13,
                                   ),
