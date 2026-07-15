@@ -17,38 +17,48 @@ class DashboardLogic {
 
   // Menyimpan daftar lokasi_id dari hak akses user biasa
   List<int> allowedLokasiIds = [];
+  int? _myLokasiId;
 
-  // Statistik Properti & Penghuni Akumulatif (Global)
-  int totalPenghuni = 0;
+  // =========================================================================
+  // RINGKASAN GLOBAL — Diambil dari objek 'summary' API /unit (TANPA GEDUNG)
+  // =========================================================================
   int totalUnit = 0;
   int unitTerisi = 0;
-  int unitKosong = 0;
-  int kontrakAkanHabis = 0;
-
-  // 🎯 Variabel global penampung Unit Perbaikan (status_jual == 0 atau 'perbaikan')
+  int unitKosong = 0;      // Dihitung secara dinamis dari summary /unit agar kompatibel dengan UI
   int unitPerbaikan = 0;
+  int unitTersedia = 0;
+  double okupansi = 0;
+  double occupancy = 0.0; // Sinkronisasi penamaan variabel lama agar UI tetap aman
 
-  // Tempat menyimpan hasil rincian breakdown data per ruko/rusunawa khusus Pimpinan
+  // =========================================================================
+  // RINCIAN PER LOKASI — Menampilkan breakdown per lokasi (TANPA GEDUNG)
+  // =========================================================================
   List<Map<String, dynamic>> statistikPerLokasi = [];
 
-  // Demografi Umur Penghuni (Kategori Lansia & Manula Terpisah secara Presisi)
+  // Demografi Umur Penghuni & Variabel Kontrak Lama (Dipertahankan untuk mencegah error di UI)
+  int totalPenghuni = 0;
+  int kontrakAkanHabis = 0;
   int jmlBalita = 0;
   int jmlAnak = 0;
   int jmlRemaja = 0;
   int jmlDewasa = 0;
-  int jmlLansia = 0;  // Lansia (46 - 59 tahun)
-  int jmlManula = 0;  // Manula (>= 60 tahun)
+  int jmlLansia = 0;
+  int jmlManula = 0;
 
-  // Ringkasan Jadwal Antrean Wawancara Calon Penghuni
+  // Ringkasan Jadwal Antrean Wawancara Calon Penghuni (Dipertahankan dari kode lama)
   int totalAntreanWawancancara = 0;
   int wawancaraTerlewatAlert = 0;
   int belumDiwawancara = 0;
   int wawancaraHariIni = 0;
   int wawancaraBesok = 0;
   int wawancaraMingguIni = 0;
-
-  // Menyimpan seluruh daftar wawancara murni hasil fetch API untuk proses filter di UI
   List<Map<String, dynamic>> semuaDaftarWawancaraMurni = [];
+
+  // Metadata Pagination untuk Wawancara Terlewat
+  int currentPageWawancara = 1;
+  int lastPageWawancara = 1;
+  int totalWawancara = 0;
+  int perPageWawancara = 5;
 
   Map<String, String> _getHeaders(String? explicitToken) {
     final tokenToUse = explicitToken ?? authToken;
@@ -63,9 +73,16 @@ class DashboardLogic {
     if (value == null) return null;
     if (value is int) return value;
     if (value is double) return value.toInt();
-    String strValue = value.toString().trim();
+    final strValue = value.toString().trim();
     if (strValue.isEmpty || strValue.toLowerCase() == 'null') return null;
     return int.tryParse(strValue);
+  }
+
+  double _safeParseDouble(dynamic value) {
+    if (value == null) return 0;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    return double.tryParse(value.toString()) ?? 0;
   }
 
   List<Map<String, dynamic>> getFilteredWawancara(int? selectedLokasiId) {
@@ -77,19 +94,23 @@ class DashboardLogic {
         .toList();
   }
 
-  Future<void> fetchDashboardData({String? updatedToken}) async {
+  Future<void> fetchDashboardData({String? updatedToken, int page = 1, int? lokasiId}) async {
     if (updatedToken != null) {
       authToken = updatedToken;
     }
+    currentPageWawancara = page;
 
     isLoading = true;
     _notify();
-    _resetStatistics();
+    
+    // Reset data selain pagination agar UI tidak flickering parah jika diperlukan, 
+    // tapi biasanya data ringkasan tetap dipertahankan.
+    if (page == 1) _resetStatistics();
 
     final Map<String, String> headers = _getHeaders(updatedToken);
 
     try {
-      debugPrint("--- REFRESH DATA DASHBOARD PERKIM ---");
+      debugPrint("--- REFRESH DATA DASHBOARD PERKIM (Page: $page) ---");
 
       // =========================================================================
       // 1. CEK IDENTITAS USER DAN VALIDASI ROLE
@@ -112,52 +133,66 @@ class DashboardLogic {
         if (userData != null) {
           adminName = (userData['name'] ?? "Admin").toString();
 
-          // Deteksi apakah user login bermode pimpinan
-          String roleUser = (userData['role'] ?? '').toString().toLowerCase();
+          final roleUser = (userData['role'] ?? '').toString().toLowerCase();
           isPimpinan = (roleUser == 'pimpinan');
 
+          _myLokasiId = _safeParseInt(userData['lokasi_id']);
           allowedLokasiIds.clear();
-
-          // Jika petugas biasa, filter lokasi aktif dimuat. Jika pimpinan, load seluruh lokasi
-          if (!isPimpinan && userData['lokasi_id'] != null) {
-            int? idLoc = _safeParseInt(userData['lokasi_id']);
-            if (idLoc != null) {
-              allowedLokasiIds.add(idLoc);
-            }
+          if (_myLokasiId != null) {
+            allowedLokasiIds.add(_myLokasiId!);
           }
 
-          debugPrint("🔒 Hak Akses Terbuka: ${isPimpinan ? 'Pimpinan (Semua Lokasi Terbuka)' : 'Petugas Terbatas ($allowedLokasiIds)'}");
+          debugPrint("🔒 Hak Akses: ${isPimpinan ? 'Pimpinan (Semua Lokasi)' : 'Petugas (lokasi_id=$_myLokasiId)'}");
         }
       } else {
         throw 'Server Error Profile Status: ${resProfile.statusCode}';
       }
 
       // =========================================================================
-      // 2. PARALEL REQUEST DATA HIRARKI DAN PENDAFTAR
+      // 2. AMBIL DATA DARI ENDPOINT /unit, /pendaftar/wawancara-terlewat, DAN /penghuni SECARA PARALEL
       // =========================================================================
-      final responses = await Future.wait([
-        http.get(Uri.parse('$baseUrl/lokasi-hirarki'), headers: headers),
-        http.get(Uri.parse('$baseUrl/pendaftar'), headers: headers),
-      ].map((future) => future.timeout(const Duration(seconds: 7))));
-
-      // =========================================================================
-      // 3. PARSING UNIT, GEDUNG, DAN PENGHUNI KONTRAK
-      // =========================================================================
-      if (responses[0].statusCode == 200) {
-        final Map<String, dynamic> body = json.decode(responses[0].body);
-        _processLokasiHirarki(body['data'] ?? body);
-      } else {
-        throw 'Server Error Lokasi Status: ${responses[0].statusCode}';
+      String urlUnit = '$baseUrl/unit';
+      if (!isPimpinan && _myLokasiId != null) {
+        urlUnit += '?lokasi_id=$_myLokasiId';
       }
 
-      // =========================================================================
-      // 4. PARSING ANTREAN WAWANCARA
-      // =========================================================================
+      // Hit endpoint pendaftar/wawancara-terlewat dengan pagination
+      String urlWawancara = '$baseUrl/pendaftar/wawancara-terlewat?per_page=$perPageWawancara&page=$page';
+      
+      // Filter lokasi: Jika Pimpinan kirim lokasiId dari UI, jika Petugas kirim _myLokasiId
+      int? filterLokasiId = isPimpinan ? lokasiId : _myLokasiId;
+      if (filterLokasiId != null) {
+        urlWawancara += '&lokasi_id=$filterLokasiId';
+      }
+
+      final responses = await Future.wait([
+        http.get(Uri.parse(urlUnit), headers: headers),
+        http.get(Uri.parse(urlWawancara), headers: headers),
+        http.get(Uri.parse('$baseUrl/penghuni/statistik-demografi'), headers: headers),
+      ].map((future) => future.timeout(const Duration(seconds: 7))));
+
+      // Parsing Response GET /unit (Menggunakan Kodingan Baru & Menghapus Aspek Gedung)
+      if (responses[0].statusCode == 200) {
+        final Map<String, dynamic> body = json.decode(responses[0].body);
+        _processUnitData(body);
+      } else {
+        throw 'Server Error Unit Status: ${responses[0].statusCode}';
+      }
+
+      // Parsing Response GET /pendaftar/wawancara-terlewat
       if (responses[1].statusCode == 200) {
         final dynamic body = json.decode(responses[1].body);
-        _processPendaftarWawancara(body['data'] ?? body);
+        _processPendaftarWawancaraTerlewat(body);
       } else {
-        throw 'Server Error Pendaftar Status: ${responses[1].statusCode}';
+        throw 'Server Error Wawancara Status: ${responses[1].statusCode}';
+      }
+
+      // Parsing Response GET /penghuni/statistik-demografi
+      if (responses[2].statusCode == 200) {
+        final dynamic body = json.decode(responses[2].body);
+        _processDemografiData(body);
+      } else {
+        debugPrint('⚠️ Server Error Demografi Status: ${responses[2].statusCode}');
       }
 
     } catch (e) {
@@ -173,16 +208,21 @@ class DashboardLogic {
     totalUnit = 0;
     unitTerisi = 0;
     unitKosong = 0;
-    unitPerbaikan = 0; // Reset unit perbaikan
+    unitPerbaikan = 0;
+    unitTersedia = 0;
+    okupansi = 0;
+    occupancy = 0.0;
+    statistikPerLokasi = [];
+
     totalPenghuni = 0;
     kontrakAkanHabis = 0;
-    statistikPerLokasi = [];
     jmlBalita = 0;
     jmlAnak = 0;
     jmlRemaja = 0;
     jmlDewasa = 0;
     jmlLansia = 0;
     jmlManula = 0;
+
     totalAntreanWawancancara = 0;
     wawancaraTerlewatAlert = 0;
     belumDiwawancara = 0;
@@ -192,338 +232,99 @@ class DashboardLogic {
     semuaDaftarWawancaraMurni = [];
   }
 
-  void _processLokasiHirarki(dynamic lokasiUserList) {
-    if (lokasiUserList == null) return;
-
-    List<dynamic> rawList = [];
-    if (lokasiUserList is List) {
-      rawList = lokasiUserList;
-    } else if (lokasiUserList is Map) {
-      rawList = lokasiUserList['lokasi'] ?? [lokasiUserList];
+  // =========================================================================
+  // 🎯 PARSING DATA UNIT DARI ENDPOINT /unit 
+  // =========================================================================
+  void _processUnitData(Map<String, dynamic> body) {
+    final bool success = body['success'] == true;
+    if (!success) {
+      debugPrint("⚠️ Response /unit success=false: ${body['message']}");
+      return;
     }
 
-    final DateTime todayZeroHour = DateTime(2026, DateTime.now().month, DateTime.now().day);
+    final Map<String, dynamic>? summary = body['summary'];
+    if (summary != null) {
+      totalUnit = _safeParseInt(summary['total_unit']) ?? 0;
+      unitTerisi = _safeParseInt(summary['total_unit_terisi']) ?? 0;
+      unitPerbaikan = _safeParseInt(summary['total_unit_perbaikan']) ?? 0;
+      unitTersedia = _safeParseInt(summary['unit tersedia'] ?? summary['unit_tersedia']) ?? 0;
+      okupansi = _safeParseDouble(summary['okupansi']);
+      occupancy = okupansi;
 
-    for (var item in rawList) {
-      if (item == null || item is! Map) continue;
+      // Perhitungan dinamis unit kosong untuk keperluan UI lama Anda
+      unitKosong = totalUnit - unitTerisi - unitPerbaikan;
+    }
 
-      var lokasi = item['lokasi'];
-      if (lokasi == null || lokasi is! Map) continue;
+    final List<dynamic>? data = body['data'];
+    if (data != null) {
+      statistikPerLokasi = data.map<Map<String, dynamic>>((item) {
+        final Map<String, dynamic> m = item as Map<String, dynamic>;
 
-      int? currentLokasiId = _safeParseInt(lokasi['id']);
+        int itemTotalUnit = _safeParseInt(m['total_unit']) ?? 0;
+        int itemUnitTerisi = _safeParseInt(m['total_unit_terisi']) ?? 0;
+        int itemUnitPerbaikan = _safeParseInt(m['total_unit_perbaikan']) ?? 0;
 
-      if (!isPimpinan && allowedLokasiIds.isNotEmpty && currentLokasiId != null) {
-        if (!allowedLokasiIds.contains(currentLokasiId)) {
-          continue;
-        }
-      }
-
-      String namaLokasi = lokasi['nama_lokasi'] ?? 'Rusunawa';
-      int unitTerisiLokasi = 0;
-      int unitKosongLokasi = 0;
-      int unitPerbaikanLokasi = 0; // Penampung lokal per lokasi
-      int totalUnitLokasi = 0;
-      int penghuniLokasi = 0;
-
-      // Sinkron dengan LocationController@index (backend) yang mengirim key 'gedung' & 'unit'
-      // (singular). Fallback 'gedungs' / 'units' tetap dipertahankan untuk kompatibilitas
-      // ke belakang seandainya backend suatu saat berubah balik memakai nama relasi Eloquent.
-      var staticGedungs = lokasi['gedung'] ?? lokasi['gedungs'];
-      var gedungList = staticGedungs;
-      if (gedungList != null && gedungList is List) {
-        for (var gedung in gedungList) {
-          if (gedung == null || gedung is! Map) continue;
-
-          var unitList = gedung['unit'] ?? gedung['units'];
-          if (unitList == null || unitList is! List) continue;
-
-          for (var unit in unitList) {
-            if (unit == null || unit is! Map) continue;
-
-            // 🎯 PERBAIKAN EVALUASI: Deteksi status_jual secara aman (bisa int, String, atau boolean)
-            // Backend (LocationController@index) mengirim nilai kolom `status_jual` APA ADANYA
-            // dari database (varchar '0' / '1'), jadi jalur `else` (String) di bawah ini yang
-            // akan selalu dipakai untuk kasus normal — tapi int/bool tetap dijaga untuk jaga-jaga.
-            var statusJualRaw = unit['status_jual'];
-            bool isPerbaikan = false;
-
-            if (statusJualRaw != null) {
-              if (statusJualRaw is int && statusJualRaw == 0) {
-                isPerbaikan = true;
-              } else if (statusJualRaw is bool && statusJualRaw == false) {
-                isPerbaikan = true;
-              } else {
-                String statusStr = statusJualRaw.toString().trim().toLowerCase();
-                if (statusStr == '0' || statusStr == 'perbaikan' || statusStr == 'false') {
-                  isPerbaikan = true;
-                }
-              }
-            }
-
-            if (isPerbaikan) {
-              unitPerbaikan++;
-              unitPerbaikanLokasi++;
-            } else {
-              // Jika status_jual bernilai selain perbaikan (aktif/tersedia), hitung status unit seperti biasa (terisi / kosong)
-              bool isUnitTerisi = false;
-              if (unit['is_terisi'] != null) {
-                var rawIsTerisi = unit['is_terisi'];
-                isUnitTerisi = (rawIsTerisi == 1 ||
-                    rawIsTerisi == true ||
-                    rawIsTerisi.toString().trim().toLowerCase() == '1' ||
-                    rawIsTerisi.toString().trim().toLowerCase() == 'true');
-              }
-
-              var kontraks = unit['kontrak'] ?? unit['kontraks'];
-              dynamic activeContract;
-
-              if (kontraks != null && kontraks is List) {
-                for (var k in kontraks) {
-                  if (k == null || k is! Map) continue;
-                  var rawStatus = k['status_kontrak'];
-                  if (rawStatus == 1 ||
-                      rawStatus == true ||
-                      rawStatus.toString().trim() == '1') {
-                    activeContract = k;
-                    break;
-                  }
-                }
-              }
-
-              if (isUnitTerisi || activeContract != null) {
-                unitTerisi++;
-                unitTerisiLokasi++;
-
-                if (activeContract != null && activeContract['tgl_akhir'] != null) {
-                  try {
-                    String tglEnding = activeContract['tgl_akhir'].toString().split(' ')[0];
-                    DateTime tglAkhir = DateTime.parse(tglEnding);
-                    int sisaHari = tglAkhir.difference(todayZeroHour).inDays;
-                    if (sisaHari >= 0 && sisaHari <= 7) {
-                      kontrakAkanHabis++;
-                    }
-                  } catch (_) {}
-                }
-
-                if (activeContract != null) {
-                  List<String> penghuniKeys = ['penghuni_satu', 'penghuni_dua', 'penghuni_tiga', 'penghuni_empat', 'penghuni_id1'];
-                  for (var key in penghuniKeys) {
-                    if (activeContract[key] != null) {
-                      _checkAndParsePenghuni(activeContract[key]);
-                      penghuniLokasi++;
-                    }
-                  }
-
-                  var listPenghuniDirect = activeContract['penghuni'] ?? activeContract['penghunis'];
-                  if (listPenghuniDirect != null) {
-                    _checkAndParsePenghuni(listPenghuniDirect);
-                    if (listPenghuniDirect is List) {
-                      penghuniLokasi += listPenghuniDirect.length;
-                    } else {
-                      penghuniLokasi++;
-                    }
-                  }
-                }
-              } else {
-                unitKosong++;
-                unitKosongLokasi++;
-              }
-            }
-
-            // Tetap dihitung ke dalam total unit agar data sinkron di grafik/UI
-            totalUnit++;
-            totalUnitLokasi++;
-          }
-        }
-      }
-
-      // Menyimpan data statistik internal per lokasi tunggal (termasuk unit_perbaikan)
-      statistikPerLokasi.add({
-        "id": currentLokasiId,
-        "nama_lokasi": namaLokasi,
-        "total_unit": totalUnitLokasi,
-        "unit_terisi": unitTerisiLokasi,
-        "unit_kosong": unitKosongLokasi,
-        "unit_perbaikan": unitPerbaikanLokasi, // Ditambahkan ke breakdown lokasi pimpinan
-        "total_penghuni": penghuniLokasi,
-      });
+        return {
+          "id": _safeParseInt(m['id_lokasi']),
+          "nama_lokasi": (m['nama_lokasi'] ?? 'Tanpa Lokasi').toString(),
+          "total_unit": itemTotalUnit,
+          "unit_terisi": itemUnitTerisi,
+          "unit_kosong": itemTotalUnit - itemUnitTerisi - itemUnitPerbaikan,
+          "unit_perbaikan": itemUnitPerbaikan,
+          "unit_tersedia": _safeParseInt(m['unit_tersedia']) ?? 0,
+          "okupansi": _safeParseDouble(m['okupansi']),
+        };
+      }).toList();
     }
   }
 
-  void _checkAndParsePenghuni(dynamic pData) {
-    if (pData == null) return;
-    if (pData is List) {
-      for (var item in pData) {
-        _parsePenghuniUmur(item);
-      }
-    } else if (pData is Map) {
-      _parsePenghuniUmur(pData);
-    }
-  }
+  // =========================================================================
+  // 🎯 PARSING ANTREAN WAWANCARA TERLEWAT (Endpoint Baru dengan Pagination)
+  // =========================================================================
+  void _processPendaftarWawancaraTerlewat(dynamic responseBody) {
+    if (responseBody == null || responseBody['success'] != true) return;
 
-  void _parsePenghuniUmur(dynamic p) {
-    if (p == null || p is! Map || p['tgl_lahir'] == null) return;
+    final List<dynamic> data = responseBody['data'] ?? [];
+    final Map<String, dynamic>? meta = responseBody['meta'];
 
-    totalPenghuni++;
-    try {
-      String tglLahirRaw = p['tgl_lahir'].toString().split(' ')[0];
-      DateTime tglLahir = DateTime.parse(tglLahirRaw);
-
-      DateTime target2026 = DateTime(2026, DateTime.now().month, DateTime.now().day);
-
-      // Hitung perbedaan tahun dasar
-      int umur = target2026.year - tglLahir.year;
-
-      // Evaluasi apakah tanggal lahir hari ini di tahun 2026 sudah terlewati atau belum
-      if (target2026.month < tglLahir.month ||
-          (target2026.month == tglLahir.month && target2026.day < tglLahir.day)) {
-        umur--;
-      }
-
-      // Penentuan Kategori Umur Presisi (Termasuk batas ketat usia Balita/Anak di umur 5 tahun)
-      if (umur < 5) {
-        jmlBalita++;
-      } else if (umur == 5) {
-        // Cek secara presisi apakah hari ini sudah melewati hari ulang tahun ke-5 atau belum
-        DateTime tglUltahKe5 = DateTime(tglLahir.year + 5, tglLahir.month, tglLahir.day);
-        if (target2026.isAfter(tglUltahKe5)) {
-          jmlAnak++; // Lebih dari 5 tahun (walau 1 hari) masuk kategori Anak
-        } else {
-          jmlBalita++; // Tepat umur 5 tahun ke bawah masuk Balita
-        }
-      } else if (umur <= 11) {
-        jmlAnak++;
-      } else if (umur <= 25) {
-        jmlRemaja++;
-      } else if (umur <= 45) {
-        jmlDewasa++;
-      } else if (umur <= 59) {
-        jmlLansia++;
-      } else {
-        jmlManula++; // >= 60 Tahun (Manula)
-      }
-    } catch (e) {
-      debugPrint("Gagal parse umur penghuni: $e");
-    }
-  }
-
-  void _processPendaftarWawancara(dynamic pendaftarList) {
-    if (pendaftarList == null || pendaftarList is! List) return;
-
-    final DateTime now = DateTime.now();
-    final DateTime targetHariIni = DateTime(2026, now.month, now.day);
-
-    List<Map<String, dynamic>> listWawancaraDiproses = [];
-
-    for (var p in pendaftarList) {
-      if (p == null || p is! Map) continue;
-
-      dynamic lokasiRaw = p['lokasi'];
-      int? pendaftarLocationsId = _safeParseInt(p['lokasi_id'] ?? (lokasiRaw is Map ? lokasiRaw['id'] : null));
-
-      if (!isPimpinan && allowedLokasiIds.isNotEmpty) {
-        if (pendaftarLocationsId != null && !allowedLokasiIds.contains(pendaftarLocationsId)) {
-          continue;
-        }
-      }
-
-      var fieldTanggal = p['tgl_wawancara'] ?? p['tanggal_wawancara'];
-
-      String namaLokasiTujuan = "Rusunawa";
-      if (lokasiRaw is Map && lokasiRaw['nama_lokasi'] != null) {
-        namaLokasiTujuan = lokasiRaw['nama_lokasi'].toString();
-      } else if (lokasiRaw is String && lokasiRaw.isNotEmpty) {
-        namaLokasiTujuan = lokasiRaw;
-      }
-
-      if (fieldTanggal != null && fieldTanggal.toString().trim().isNotEmpty) {
-        try {
-          String tglRaw = fieldTanggal.toString().trim().split(' ')[0];
-          DateTime tglWawancara = DateTime.parse(tglRaw);
-          DateTime tglWawancaraMurni = DateTime(tglWawancara.year, tglWawancara.month, tglWawancara.day);
-
-          int selisihHari = tglWawancaraMurni.difference(targetHariIni).inDays;
-          bool isOverdue = false;
-          String labelTanggal = tglRaw;
-
-          if (selisihHari >= 0 && selisihHari <= 7) {
-            wawancaraMingguIni++;
-          }
-
-          if (selisihHari == 0) {
-            wawancaraHariIni++;
-            labelTanggal = "Hari ini";
-            totalAntreanWawancancara++;
-            belumDiwawancara++;
-          } else if (selisihHari == 1) {
-            wawancaraBesok++;
-            labelTanggal = "Besok";
-            totalAntreanWawancancara++;
-            belumDiwawancara++;
-          } else if (selisihHari < 0) {
-            wawancaraTerlewatAlert++;
-            isOverdue = true;
-            labelTanggal = "Terlewat (${-selisihHari} hari)";
-          } else {
-            labelTanggal = "$selisihHari hari lagi";
-            totalAntreanWawancancara++;
-            belumDiwawancara++;
-          }
-
-          listWawancaraDiproses.add({
-            "nama": p['nama'] ?? "Tanpa Nama",
-            "tgl_wawancara": labelTanggal,
-            "jam": p['jam_wawancara'] ?? p['jam'] ?? "--:-- WIB",
-            "lokasi_tujuan": namaLokasiTujuan,
-            "lokasi_id": pendaftarLocationsId,
-            "is_overdue": isOverdue,
-            "tgl_datetime": tglWawancaraMurni,
-            "selisih_hari": selisihHari,
-          });
-
-        } catch (e) {
-          listWawancaraDiproses.add({
-            "nama": p['nama'] ?? "Tanpa Nama",
-            "tgl_wawancara": "Format Salah",
-            "jam": p['jam_wawancara'] ?? p['jam'] ?? "--:-- WIB",
-            "lokasi_tujuan": namaLokasiTujuan,
-            "lokasi_id": pendaftarLocationsId,
-            "is_overdue": false,
-            "tgl_datetime": DateTime(2099, 12, 31),
-            "selisih_hari": 9999,
-          });
-        }
-      } else {
-        listWawancaraDiproses.add({
-          "nama": p['nama'] ?? "Tanpa Nama",
-          "tgl_wawancara": "Belum Terjadwal",
-          "jam": p['jam_wawancara'] ?? p['jam'] ?? "--:-- WIB",
-          "lokasi_tujuan": namaLokasiTujuan,
-          "lokasi_id": pendaftarLocationsId,
-          "is_overdue": false,
-          "tgl_datetime": DateTime(2099, 12, 31),
-          "selisih_hari": 9999,
-        });
-      }
+    if (meta != null) {
+      currentPageWawancara = _safeParseInt(meta['current_page']) ?? 1;
+      lastPageWawancara = _safeParseInt(meta['last_page']) ?? 1;
+      totalWawancara = _safeParseInt(meta['total']) ?? 0;
+      perPageWawancara = _safeParseInt(meta['per_page']) ?? 5;
     }
 
-    // SINKRONISASI FILTER: Urutkan dari jadwal paling lama ke paling baru (kronologis ascending)
-    listWawancaraDiproses.sort((a, b) {
-      final tglA = a['tgl_datetime'] as DateTime;
-      final tglB = b['tgl_datetime'] as DateTime;
-      return tglA.compareTo(tglB);
-    });
-
-    semuaDaftarWawancaraMurni = listWawancaraDiproses.map((e) {
+    semuaDaftarWawancaraMurni = data.map<Map<String, dynamic>>((item) {
       return {
-        "nama": e['nama'],
-        "tgl_wawancara": e['tgl_wawancara'],
-        "jam": e['jam'],
-        "lokasi_tujuan": e['lokasi_tujuan'],
-        "lokasi_id": e['lokasi_id'],
-        "is_overdue": e['is_overdue'],
+        "id": item['id'],
+        "nama": item['nama'] ?? "Tanpa Nama",
+        "tgl_wawancara": item['tgl_wawancara'] ?? "Belum Terjadwal",
+        "lokasi_tujuan": item['nama_lokasi'] ?? "Rusunawa",
+        "hari_terlewat": item['hari_terlewat'] ?? 0,
+        "is_overdue": true,
       };
     }).toList();
+    
+    // Sinkronisasi variabel lama agar UI tidak error jika menggunakannya
+    totalAntreanWawancancara = totalWawancara;
+    wawancaraTerlewatAlert = totalWawancara;
+  }
+
+  // =========================================================================
+  // 🎯 PARSING DEMOGRAFI PENGHUNI
+  // =========================================================================
+  void _processDemografiData(Map<String, dynamic> body) {
+    if (body['success'] != true) return;
+    final Map<String, dynamic>? data = body['data'];
+    if (data != null) {
+      totalPenghuni = _safeParseInt(data['total_penghuni']) ?? 0;
+      jmlBalita = _safeParseInt(data['jml_balita']) ?? 0;
+      jmlAnak = _safeParseInt(data['jml_anak']) ?? 0;
+      jmlRemaja = _safeParseInt(data['jml_remaja']) ?? 0;
+      jmlDewasa = _safeParseInt(data['jml_dewasa']) ?? 0;
+      jmlLansia = _safeParseInt(data['jml_lansia']) ?? 0;
+      jmlManula = _safeParseInt(data['jml_manula']) ?? 0;
+    }
   }
 
   void _notify() => onUpdate?.call();

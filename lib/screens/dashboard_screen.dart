@@ -19,10 +19,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // 🎯 Menyimpan ID lokasi terpilih untuk menyaring antrean wawancara (null berarti Semua Lokasi)
   int? _selectedLokasiId;
 
-  // 🎯 STATE BARU: Pagination untuk Antrean Wawancara (5 data per halaman)
-  int _currentPage = 1;
-  final int _perPage = 5;
-
   @override
   void initState() {
     super.initState();
@@ -38,11 +34,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   /// Memuat data dashboard dengan penanganan error pemeliharaan backend
-  Future<void> _loadDashboardData() async {
+  Future<void> _loadDashboardData({int page = 1}) async {
     if (!mounted) return;
 
     try {
-      await _logic.fetchDashboardData(updatedToken: widget.token);
+      await _logic.fetchDashboardData(
+        updatedToken: widget.token,
+        page: page,
+        lokasiId: _selectedLokasiId,
+      );
     } catch (e) {
       if (mounted) {
         _handleServerMaintenance();
@@ -84,29 +84,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     String rasioOkupansiTeks = "${(rasioOkupansiAngka * 100).toStringAsFixed(0)}%";
     int totalPgh = _logic.totalPenghuni;
 
-    // 🎯 KONDISI LOGIKA ROLE: Pimpinan menggunakan list terfilter, yang lain menggunakan list biasa bawaan
-    final List<Map<String, dynamic>> wawancaraList = _logic.getFilteredWawancara(
-      _logic.isPimpinan ? _selectedLokasiId : null,
-    );
-
-    // 🎯 LOGIKA PAGINATION AMAN: Memotong list data untuk halaman aktif saja
-    final int totalWawancara = wawancaraList.length;
-    final int totalPages = (totalWawancara / _perPage).ceil();
-
-    // Proteksi jika halaman aktif melebihi total halaman baru akibat filter lokasi berubah
-    if (_currentPage > totalPages && totalPages > 0) {
-      _currentPage = totalPages;
-    } else if (totalPages == 0) {
-      _currentPage = 1;
-    }
-
-    final int startIndex = (_currentPage - 1) * _perPage;
-    final int endIndex = (startIndex + _perPage) > totalWawancara ? totalWawancara : (startIndex + _perPage);
-
-    // Potongan list yang akan dirender di layar saat ini
-    final List<Map<String, dynamic>> paginatedWawancaraList = totalWawancara > 0
-        ? wawancaraList.sublist(startIndex, endIndex)
-        : [];
+    // 🎯 DATA DARI LOGIC: Menggunakan list yang sudah di-fetch dari server (per halaman)
+    final List<Map<String, dynamic>> paginatedWawancaraList = _logic.semuaDaftarWawancaraMurni;
+    final int totalWawancaraGlobal = _logic.totalWawancara;
+    final int currentPageWawancara = _logic.currentPageWawancara;
+    final int lastPageWawancara = _logic.lastPageWawancara;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
@@ -122,14 +104,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         actions: [
           IconButton(
             icon: Icon(Icons.refresh, color: _activeColor),
-            onPressed: () => _loadDashboardData(),
+            onPressed: () => _loadDashboardData(page: 1),
           ),
         ],
       ),
       body: _logic.isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-        onRefresh: _loadDashboardData,
+        onRefresh: () => _loadDashboardData(page: 1),
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(16.0),
@@ -426,9 +408,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: Text(
                         _logic.isPimpinan
                             ? (_selectedLokasiId == null
-                            ? 'Semua Wilayah ($totalWawancara)'
-                            : 'Filter Aktif ($totalWawancara)')
-                            : 'Aktif ($totalWawancara)',
+                            ? 'Semua Wilayah ($totalWawancaraGlobal)'
+                            : 'Filter Aktif ($totalWawancaraGlobal)')
+                            : 'Aktif ($totalWawancaraGlobal)',
                         style: TextStyle(color: _activeColor, fontSize: 11, fontWeight: FontWeight.bold),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -477,8 +459,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       onChanged: (int? newValue) {
                         setState(() {
                           _selectedLokasiId = newValue;
-                          _currentPage = 1; // 🎯 Reset halaman ke 1 setiap kali pimpinan ganti lokasi filter
                         });
+                        _loadDashboardData(page: 1); // 🎯 Fetch ulang dari server saat filter ganti
                       },
                     ),
                   ),
@@ -588,7 +570,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                   const SizedBox(height: 12),
                   // 🎯 Memunculkan Widget Kontrol Pagination di bawah daftar
-                  _buildPaginationControls(totalWawancara),
+                  _buildPaginationControls(currentPageWawancara, lastPageWawancara),
                 ],
               ),
             ],
@@ -598,10 +580,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  /// 🎯 WIDGET HELPER: Navigasi Pagination Elegan
-  Widget _buildPaginationControls(int totalItems) {
-    final int totalPages = (totalItems / _perPage).ceil();
-
+  /// 🎯 WIDGET HELPER: Navigasi Pagination Elegan (Server-Side)
+  Widget _buildPaginationControls(int currentPage, int totalPages) {
     // Jika data tidak melebihi 1 halaman, tombol kontrol disembunyikan secara rapi
     if (totalPages <= 1) return const SizedBox.shrink();
 
@@ -618,18 +598,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
           // Tombol Back
           IconButton(
             icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 14),
-            color: _currentPage > 1 ? _activeColor : Colors.grey.shade400,
-            onPressed: _currentPage > 1
-                ? () {
-              setState(() {
-                _currentPage--;
-              });
-            }
+            color: currentPage > 1 ? _activeColor : Colors.grey.shade400,
+            onPressed: currentPage > 1
+                ? () => _loadDashboardData(page: currentPage - 1)
                 : null,
           ),
           // Indikator teks halaman aktif
           Text(
-            'Halaman $_currentPage dari $totalPages',
+            'Halaman $currentPage dari $totalPages',
             style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
@@ -639,13 +615,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           // Tombol Next
           IconButton(
             icon: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
-            color: _currentPage < totalPages ? _activeColor : Colors.grey.shade400,
-            onPressed: _currentPage < totalPages
-                ? () {
-              setState(() {
-                _currentPage++;
-              });
-            }
+            color: currentPage < totalPages ? _activeColor : Colors.grey.shade400,
+            onPressed: currentPage < totalPages
+                ? () => _loadDashboardData(page: currentPage + 1)
                 : null,
           ),
         ],
