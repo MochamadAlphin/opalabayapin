@@ -20,8 +20,9 @@ class DashboardLogic {
   int? _myLokasiId;
 
   // =========================================================================
-  // RINGKASAN GLOBAL — Diambil dari objek 'summary' API /unit (TANPA GEDUNG)
+  // RINGKASAN GLOBAL — Diambil dari objek 'summary' API /unit
   // =========================================================================
+  int totalGedung = 0;
   int totalUnit = 0;
   int unitTerisi = 0;
   int unitKosong = 0;      // Dihitung secara dinamis dari summary /unit agar kompatibel dengan UI
@@ -171,7 +172,7 @@ class DashboardLogic {
         http.get(Uri.parse('$baseUrl/penghuni/statistik-demografi'), headers: headers),
       ].map((future) => future.timeout(const Duration(seconds: 7))));
 
-      // Parsing Response GET /unit (Menggunakan Kodingan Baru & Menghapus Aspek Gedung)
+      // Parsing Response GET /unit
       if (responses[0].statusCode == 200) {
         final Map<String, dynamic> body = json.decode(responses[0].body);
         _processUnitData(body);
@@ -205,6 +206,7 @@ class DashboardLogic {
   }
 
   void _resetStatistics() {
+    totalGedung = 0;
     totalUnit = 0;
     unitTerisi = 0;
     unitKosong = 0;
@@ -244,6 +246,7 @@ class DashboardLogic {
 
     final Map<String, dynamic>? summary = body['summary'];
     if (summary != null) {
+      totalGedung = _safeParseInt(summary['total_gedung']) ?? 0;
       totalUnit = _safeParseInt(summary['total_unit']) ?? 0;
       unitTerisi = _safeParseInt(summary['total_unit_terisi']) ?? 0;
       unitPerbaikan = _safeParseInt(summary['total_unit_perbaikan']) ?? 0;
@@ -267,6 +270,7 @@ class DashboardLogic {
         return {
           "id": _safeParseInt(m['id_lokasi']),
           "nama_lokasi": (m['nama_lokasi'] ?? 'Tanpa Lokasi').toString(),
+          "total_gedung": _safeParseInt(m['total_gedung']) ?? 0,
           "total_unit": itemTotalUnit,
           "unit_terisi": itemUnitTerisi,
           "unit_kosong": itemTotalUnit - itemUnitTerisi - itemUnitPerbaikan,

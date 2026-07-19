@@ -126,8 +126,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const SizedBox(height: 2),
               Text(
                 _logic.isPimpinan
-                    ? 'Monitoring Sistem Eksekutif Seluruh Wilayah Perkim.'
-                    : 'Sistem Manajemen Hunian Terintegrated Perkim.',
+                    ? 'Monitoring Sistem Eksekutif Seluruh Wilayah rusunawa.'
+                    : 'Sistem Informasi Pengelolaan Apartemen Transit.',
                 style: const TextStyle(fontSize: 14, color: Colors.grey),
               ),
               const SizedBox(height: 16),
@@ -244,34 +244,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 physics: const NeverScrollableScrollPhysics(),
                 crossAxisSpacing: 8,
                 mainAxisSpacing: 8,
-                childAspectRatio: 1.0,
+                childAspectRatio: 0.9,
                 children: [
                   _buildSummaryCard(
-                    icon: Icons.people_alt_outlined,
+                    icon: Icons.apartment_rounded,
+                    title: 'Total Gedung',
+                    value: '${_logic.totalGedung} Gedung',
+                    iconColor: Colors.indigo,
+                  ),
+                  _buildSummaryCard(
+                    icon: Icons.people_rounded,
                     title: 'Total Penghuni',
                     value: '${_logic.totalPenghuni} Jiwa',
+                    iconColor: Colors.orange,
+                  ),
+                  _buildSummaryCard(
+                    icon: Icons.home_filled,
+                    title: 'Unit Terisi',
+                    value: '${_logic.unitTerisi} Unit',
+                    iconColor: Colors.blue,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+                childAspectRatio: 2,
+                children: [
+                  _buildSummaryCard(
+                    icon: Icons.manage_history_rounded,
+                    title: 'Unit Perbaikan',
+                    value: '${_logic.unitPerbaikan} Unit',
                     iconColor: Colors.red,
                   ),
                   _buildSummaryCard(
-                    icon: Icons.home_rounded,
-                    title: 'Unit Terisi',
-                    value: '${_logic.unitTerisi} Unit',
-                    iconColor: Colors.green,
-                  ),
-                  _buildSummaryCard(
-                    icon: Icons.meeting_room_outlined,
+                    icon: Icons.home_work_rounded,
                     title: 'Unit Kosong',
                     value: '${_logic.unitKosong} Unit',
-                    iconColor: Colors.amber,
+                    iconColor: Colors.green,
                   ),
                 ],
               ),
               const SizedBox(height: 24),
 
+
               // 5. Real-Time Per Lokasi Wilayah (Khusus Role Pimpinan)
               if (_logic.isPimpinan) ...[
                 Text(
-                  'Kondisi Hunian Per Lokasi Wilayah',
+                  'Kondisi Hunian Per Wilayah',
                   style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _activeColor),
                 ),
                 const SizedBox(height: 4),
@@ -308,7 +332,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             children: [
                               Expanded(
                                 child: Text(
-                                  lokasiData['nama_lokasi'].toString(),
+                                  "${lokasiData['nama_lokasi']} (${lokasiData['total_gedung'] ?? 0} Gedung)",
                                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: _activeColor),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -353,7 +377,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(height: 4),
               const Text(
-                'Kategori umur berdasarkan Klasifikasi Standar Kemenkes RI.',
+                'Kategori umur berdasarkan Undang Undang Kemenkes No. 24 Tahun 2009.',
                 style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
               const SizedBox(height: 12),
@@ -391,32 +415,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Antrean Wawancara Pendaftar',
+                      '($totalWawancaraGlobal) Antrean Wawancara Pendaftar',
                       style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _activeColor),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Flexible(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                          color: _activeColor.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12)
-                      ),
-                      child: Text(
-                        _logic.isPimpinan
-                            ? (_selectedLokasiId == null
-                            ? 'Semua Wilayah ($totalWawancaraGlobal)'
-                            : 'Filter Aktif ($totalWawancaraGlobal)')
-                            : 'Aktif ($totalWawancaraGlobal)',
-                        style: TextStyle(color: _activeColor, fontSize: 11, fontWeight: FontWeight.bold),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  )
+
                 ],
               ),
               const SizedBox(height: 12),
