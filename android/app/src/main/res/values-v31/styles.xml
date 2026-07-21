@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="LaunchTheme" parent="@android:style/Theme.Translucent.NoTitleBar">
+        <!-- Untuk Android 12+, kita buat icon dan background transparan agar langsung masuk ke Flutter -->
+        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBackground">@android:color/transparent</item>
+    </style>
+</resources>

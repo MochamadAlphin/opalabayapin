@@ -237,58 +237,71 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(height: 16),
 
-              // 4. Grid Ringkasan Kamar & Jiwa (Total Akumulatif)
-              GridView.count(
-                crossAxisCount: 3,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-                childAspectRatio: 0.9,
-                children: [
-                  _buildSummaryCard(
-                    icon: Icons.apartment_rounded,
-                    title: 'Total Gedung',
-                    value: '${_logic.totalGedung} Gedung',
-                    iconColor: Colors.indigo,
-                  ),
-                  _buildSummaryCard(
-                    icon: Icons.people_rounded,
-                    title: 'Total Penghuni',
-                    value: '${_logic.totalPenghuni} Jiwa',
-                    iconColor: Colors.orange,
-                  ),
-                  _buildSummaryCard(
-                    icon: Icons.home_filled,
-                    title: 'Unit Terisi',
-                    value: '${_logic.unitTerisi} Unit',
-                    iconColor: Colors.blue,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-                childAspectRatio: 2,
-                children: [
-                  _buildSummaryCard(
-                    icon: Icons.manage_history_rounded,
-                    title: 'Unit Perbaikan',
-                    value: '${_logic.unitPerbaikan} Unit',
-                    iconColor: Colors.red,
-                  ),
-                  _buildSummaryCard(
-                    icon: Icons.home_work_rounded,
-                    title: 'Unit Kosong',
-                    value: '${_logic.unitKosong} Unit',
-                    iconColor: Colors.green,
-                  ),
-                ],
-              ),
+              // 4. Grid Ringkasan Kamar & Jiwa (Dinamis Berdasarkan Role)
+              if (_logic.isPimpinan)
+                GridView.count(
+                  crossAxisCount: 2,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                  childAspectRatio: 2.1,
+                  children: [
+                    _buildSummaryCard(
+                      icon: Icons.people_rounded,
+                      title: 'Total Penghuni',
+                      value: '${_logic.totalPenghuni} Jiwa',
+                      iconColor: Colors.orange,
+                    ),
+                    _buildSummaryCard(
+                      icon: Icons.home_filled,
+                      title: 'Unit Terisi',
+                      value: '${_logic.unitTerisi} Unit',
+                      iconColor: Colors.blue,
+                    ),
+                    _buildSummaryCard(
+                      icon: Icons.home_work_rounded,
+                      title: 'Unit Kosong',
+                      value: '${_logic.unitKosong} Unit',
+                      iconColor: Colors.green,
+                    ),
+                    _buildSummaryCard(
+                      icon: Icons.manage_history_rounded,
+                      title: 'Unit Perbaikan',
+                      value: '${_logic.unitPerbaikan} Unit',
+                      iconColor: Colors.red,
+                    ),
+                  ],
+                )
+              else
+                GridView.count(
+                  crossAxisCount: 3,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                  childAspectRatio: 0.9,
+                  children: [
+                    _buildSummaryCard(
+                      icon: Icons.people_rounded,
+                      title: 'Total Penghuni',
+                      value: '${_logic.totalPenghuni} Jiwa',
+                      iconColor: Colors.orange,
+                    ),
+                    _buildSummaryCard(
+                      icon: Icons.home_work_rounded,
+                      title: 'Unit Kosong',
+                      value: '${_logic.unitKosong} Unit',
+                      iconColor: Colors.green,
+                    ),
+                    _buildSummaryCard(
+                      icon: Icons.home_filled,
+                      title: 'Unit Terisi',
+                      value: '${_logic.unitTerisi} Unit',
+                      iconColor: Colors.blue,
+                    ),
+                  ],
+                ),
               const SizedBox(height: 24),
 
 
@@ -332,7 +345,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             children: [
                               Expanded(
                                 child: Text(
-                                  "${lokasiData['nama_lokasi']} (${lokasiData['total_gedung'] ?? 0} Gedung)",
+                                  lokasiData['nama_lokasi'].toString(),
                                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: _activeColor),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
